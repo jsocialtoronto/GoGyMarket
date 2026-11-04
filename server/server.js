@@ -6,25 +6,19 @@ require("dotenv").config();
 
 const app = express();
 
-// Allow your live Vercel site and local development to communicate with Render
+// Bulletproof CORS: Allows https://gogymarket.vercel.app, preview URLs, and localhost
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "https://gogymarket.vercel.app",
-      process.env.CLIENT_URL
-    ].filter(Boolean),
+    origin: true,
     credentials: true
   })
 );
 
-// 15mb limit allows base64 listing photos to save directly in MongoDB
 app.use(express.json({ limit: "15mb" }));
 
 // ==========================================
 // 1. MONGOOSE SCHEMAS & MODELS
 // ==========================================
-
 const listingSchema = new mongoose.Schema(
   {
     sellerId: { type: String, required: true, index: true },
@@ -111,24 +105,8 @@ async function seedInitialData() {
             "https://images.unsplash.com/photo-1621905251189-08b45d6a269e?w=600&auto=format&fit=crop&q=80"
           ],
           status: "active"
-        },
-        {
-          sellerId: "usr_3",
-          sellerName: "Sarah K.",
-          title: "UPPAbaby Vista V2 Stroller + Bassinet",
-          category: "Baby and Family",
-          subcategory: "Strollers",
-          pricingType: "fixed",
-          price: 450,
-          location: "North York, ON",
-          description:
-            "Gently used stroller in charcoal grey. Folds smoothly, includes rain shield.",
-          images: [
-            "https://images.unsplash.com/photo-1591088398332-8a7791972843?w=600&auto=format&fit=crop&q=80"
-          ],
-          status: "active"
         }
-      ]);
+        ]);
       console.log("Seeded initial GoGyMarket listings into MongoDB");
     }
   } catch (err) {
@@ -140,28 +118,40 @@ async function seedInitialData() {
 // 3. API ROUTES
 // ==========================================
 
-// Health Check
+app.get("/", (req, res) => {
+  res.send("GoGyMarket API is live. Visit /api/health for status.");
+});
+
 app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     service: "GoGyMarket API is running",
-    dbConnected: mongoose.connection.readyState === 1
+    dbConnected: mongoose.connection.readyState === 1,
+    hasMongoUri: Boolean(process.env.MONGO_URI)
   });
 });
 
-// GET all listings (newest first)
 app.get("/api/listings", async (req, res) => {
   try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        error: "Database is not connected yet. Check MONGO_URI and MongoDB Network Access (0.0.0.0/0)."
+      });
+    }
     const listings = await Listing.find().sort({ createdAt: -1 });
     res.json(listings);
   } catch (err) {
-    res.status(500).json({ error: "Failed to fetch listings" });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// POST create a new listing
 app.post("/api/listings", async (req, res) => {
   try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        error: "MongoDB is not connected on Render. Make sure MONGO_URI is set in Render Environment and 0.0.0.0/0 is enabled in MongoDB Network Access."
+      });
+    }
     const newListing = await Listing.create(req.body);
     res.status(201).json(newListing);
   } catch (err) {
@@ -169,7 +159,6 @@ app.post("/api/listings", async (req, res) => {
   }
 });
 
-// PATCH update listing status (Active / Pending / Sold)
 app.patch("/api/listings/:id/status", async (req, res) => {
   try {
     const { status } = req.body;
@@ -184,7 +173,6 @@ app.patch("/api/listings/:id/status", async (req, res) => {
   }
 });
 
-// DELETE a listing
 app.delete("/api/listings/:id", async (req, res) => {
   try {
     await Listing.findByIdAndDelete(req.params.id);
@@ -194,9 +182,9 @@ app.delete("/api/listings/:id", async (req, res) => {
   }
 });
 
-// GET all message conversations
 app.get("/api/conversations", async (req, res) => {
   try {
+    if (mongoose.connection.readyState !== 1) return res.json([]);
     const convs = await Conversation.find().sort({ updatedAt: -1 });
     res.json(convs);
   } catch (err) {
@@ -204,7 +192,6 @@ app.get("/api/conversations", async (req, res) => {
   }
 });
 
-// POST start or open a conversation for a listing
 app.post("/api/conversations", async (req, res) => {
   try {
     const { listingId, listingTitle, buyerName, sellerName, initialMessage } = req.body;
@@ -231,7 +218,6 @@ app.post("/api/conversations", async (req, res) => {
   }
 });
 
-// POST send a reply inside a conversation
 app.post("/api/conversations/:id/messages", async (req, res) => {
   try {
     const { sender, text } = req.body;
@@ -255,13 +241,15 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
 // ==========================================
 if (process.env.MONGO_URI) {
   mongoose
-    .connect(process.env.MONGO_URI)
+    .connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 8000 })
     .then(async () => {
-      console.log("Connected to MongoDB Atlas (gogymarket)");
+      console.log("✅ Connected to MongoDB Atlas (gogymarket)");
       await seedInitialData();
     })
-    .catch((err) => console.error("MongoDB error:", err));
+    .catch((err) => console.error("❌ MongoDB connection error:", err.message));
+} else {
+  console.warn("⚠️ MONGO_URI environment variable is not set in Render!");
 }
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
