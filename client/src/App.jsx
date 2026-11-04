@@ -4,7 +4,7 @@ import PortalLayout from "./components/PortalLayout";
 import PostListingForm from "./components/PostListingForm";
 import { MARKETPLACE_CATEGORIES, LISTING_STATUSES } from "./config/categoriesConfig";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:5000").replace(/\/$/, "");
 
 export default function App() {
   const currentUser = {
@@ -17,7 +17,6 @@ export default function App() {
   const [listings, setListings] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Save Favourites in localStorage so they stay checked across refreshes
   const [favouriteIds, setFavouriteIds] = useState(() => {
     const saved = localStorage.getItem("gogy_favs");
     return saved ? JSON.parse(saved) : [];
@@ -33,7 +32,6 @@ export default function App() {
   const [activeConvId, setActiveConvId] = useState(null);
   const [replyText, setReplyText] = useState("");
 
-  // Fetch Listings & Conversations from Render / MongoDB on startup
   useEffect(() => {
     async function loadMarketplaceData() {
       try {
@@ -61,7 +59,6 @@ export default function App() {
     loadMarketplaceData();
   }, []);
 
-  // Sync favourites to localStorage
   useEffect(() => {
     localStorage.setItem("gogy_favs", JSON.stringify(favouriteIds));
   }, [favouriteIds]);
@@ -73,9 +70,10 @@ export default function App() {
     return `$${Number(item.price || 0).toLocaleString()}`;
   };
 
-  // When a new listing is saved in MongoDB, add it to state and go to My Listings
   const handlePublishSuccess = (savedListing) => {
     setListings((prev) => [savedListing, ...prev]);
+    setSelectedCat("");
+    setSelectedSubcat("");
     setActiveTab("listings");
   };
 
@@ -85,7 +83,6 @@ export default function App() {
     );
   };
 
-  // Update Listing Status in MongoDB
   const handleStatusChange = async (listingId, newStatus) => {
     try {
       const res = await fetch(`${API_BASE}/api/listings/${listingId}/status`, {
@@ -104,7 +101,6 @@ export default function App() {
     }
   };
 
-  // Delete Listing from MongoDB
   const handleDeleteListing = async (listingId) => {
     try {
       const res = await fetch(`${API_BASE}/api/listings/${listingId}`, {
@@ -118,7 +114,6 @@ export default function App() {
     }
   };
 
-  // Start or open a Conversation about a specific listing
   const handleMessageSeller = async (item) => {
     try {
       const res = await fetch(`${API_BASE}/api/conversations`, {
@@ -145,7 +140,6 @@ export default function App() {
     }
   };
 
-  // Send a reply in the active conversation
   const handleSendReply = async (e) => {
     e.preventDefault();
     if (!replyText.trim() || !activeConvId) return;
@@ -210,7 +204,7 @@ export default function App() {
           <aside className="bg-white p-4 rounded-xl border border-slate-200 h-fit space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="font-bold text-sm uppercase tracking-wider text-slate-600">
-                Categories
+                Browse Categories
               </h2>
               {selectedCat && (
                 <button
@@ -263,17 +257,39 @@ export default function App() {
                 </li>
               ))}
             </ul>
+
+            {/* Quick shortcut to post directly in the selected category */}
+            <div className="pt-3 border-t border-slate-200">
+              <button
+                onClick={() => setActiveTab("post")}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-2.5 px-3 rounded-lg shadow-sm transition-colors"
+              >
+                {selectedSubcat
+                  ? `+ Post in ${selectedSubcat}`
+                  : selectedCat
+                  ? `+ Post in ${selectedCat}`
+                  : "+ Post a New Listing"}
+              </button>
+            </div>
           </aside>
 
           <section className="md:col-span-3 space-y-4">
-            <div className="bg-white p-3 rounded-xl border border-slate-200 flex gap-2 items-center">
+            <div className="bg-white p-3 rounded-xl border border-slate-200 flex flex-wrap gap-2 items-center justify-between">
               <input
                 type="text"
                 placeholder="Search products or services across GoGyMarket..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-500"
+                className="flex-1 min-w-[220px] px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-500"
               />
+              {selectedCat && (
+                <button
+                  onClick={() => setActiveTab("post")}
+                  className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-3.5 py-2.5 rounded-lg whitespace-nowrap"
+                >
+                  + Post in {selectedSubcat || selectedCat}
+                </button>
+              )}
             </div>
 
             {isLoading ? (
@@ -281,8 +297,22 @@ export default function App() {
                 Loading live listings from MongoDB...
               </div>
             ) : filteredListings.length === 0 ? (
-              <div className="bg-white p-10 rounded-xl border border-slate-200 text-center text-slate-500 text-sm">
-                No active listings match this filter yet. Click "+ 3. Post Ad" to list the first item!
+              <div className="bg-white p-10 rounded-xl border border-slate-200 text-center space-y-3">
+                <p className="text-slate-600 text-sm font-medium">
+                  No active listings in{" "}
+                  <span className="font-bold text-slate-900">
+                    {selectedSubcat
+                      ? `${selectedCat} › ${selectedSubcat}`
+                      : selectedCat || "this search"}
+                  </span>{" "}
+                  yet.
+                </p>
+                <button
+                  onClick={() => setActiveTab("post")}
+                  className="inline-block bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-5 py-2.5 rounded-lg shadow-sm"
+                >
+                  + Post the First Listing in {selectedSubcat || selectedCat || "GoGyMarket"}
+                </button>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -434,6 +464,8 @@ export default function App() {
       {activeTab === "post" && (
         <PostListingForm
           currentUser={currentUser}
+          initialCategory={selectedCat}
+          initialSubcategory={selectedSubcat}
           onPublishSuccess={handlePublishSuccess}
         />
       )}
