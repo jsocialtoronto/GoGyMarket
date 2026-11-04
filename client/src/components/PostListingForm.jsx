@@ -1,6 +1,8 @@
-// src/components/PostListingForm.jsx
+// client/src/components/PostListingForm.jsx
 import React, { useState } from "react";
 import { MARKETPLACE_CATEGORIES, PRICING_TYPES } from "../config/categoriesConfig";
+
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 export default function PostListingForm({ currentUser, onPublishSuccess }) {
   const categoryNames = Object.keys(MARKETPLACE_CATEGORIES);
@@ -19,34 +21,37 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Derived list of subcategories based on the selected parent category
   const availableSubcategories = formData.category
     ? MARKETPLACE_CATEGORIES[formData.category]
     : [];
 
   const isService = formData.category === "Services";
 
-  // Cascading Category Handler
   const handleCategoryChange = (e) => {
     const selectedCategory = e.target.value;
     setFormData((prev) => ({
       ...prev,
       category: selectedCategory,
-      subcategory: "", // Reset subcategory whenever parent category changes
+      subcategory: "",
       pricingType: selectedCategory === "Services" ? "hourly" : "fixed"
     }));
   };
 
-  // Handle local image preview selection
+  // Convert uploaded photos to Base64 strings so they save in MongoDB
   const handleImageUpload = (e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
 
-    const newImageUrls = files.map((file) => URL.createObjectURL(file));
-    setFormData((prev) => ({
-      ...prev,
-      images: [...prev.images, ...newImageUrls].slice(0, 6) // Max 6 photos
-    }));
+    files.slice(0, 4).forEach((file) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFormData((prev) => ({
+          ...prev,
+          images: [...prev.images, reader.result].slice(0, 4)
+        }));
+      };
+      reader.readAsDataURL(file);
+    });
   };
 
   const removeImage = (indexToRemove) => {
@@ -80,9 +85,7 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
 
     setIsSubmitting(true);
 
-    // Construct the payload matching the MongoDB Listing Schema
     const newListingPayload = {
-      _id: "lst_" + Date.now(),
       sellerId: currentUser.id,
       sellerName: currentUser.name,
       title: formData.title.trim(),
@@ -98,32 +101,39 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
       images:
         formData.images.length > 0
           ? formData.images
-          : ["https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&auto=format&fit=crop&q=80"],
-      status: "active",
-      createdAt: new Date().toISOString()
+          : [
+              "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&auto=format&fit=crop&q=80"
+            ],
+      status: "active"
     };
 
-    /* 
-      WHEN READY FOR BACKEND (SPRINT 2), UNCOMMENT THIS FETCH CALL:
-      const res = await fetch('/api/listings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+    try {
+      const res = await fetch(`${API_BASE}/api/listings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newListingPayload)
       });
-      const savedListing = await res.json();
-    */
 
-    setTimeout(() => {
+      if (!res.ok) {
+        throw new Error("Server returned an error while saving your listing.");
+      }
+
+      const savedListing = await res.json();
       setIsSubmitting(false);
-      onPublishSuccess(newListingPayload);
-    }, 300);
+      onPublishSuccess(savedListing);
+    } catch (err) {
+      setIsSubmitting(false);
+      setError(
+        "Could not reach the Render server. Make sure VITE_API_URL is set in Vercel and Render has finished deploying."
+      );
+    }
   };
 
   return (
     <div className="max-w-3xl mx-auto bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
       <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold">Post a Listing</h2>
+          <h2 className="text-lg font-bold">Post a Listing on GoGyMarket</h2>
           <p className="text-xs text-slate-400">
             List a product or service in our predefined marketplace categories
           </p>
@@ -148,7 +158,6 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
             Step 1: Choose Category
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Parent Category Dropdown */}
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1">
                 Main Category *
@@ -156,7 +165,7 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
               <select
                 value={formData.category}
                 onChange={handleCategoryChange}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
               >
                 <option value="">-- Select a Category --</option>
                 {categoryNames.map((cat) => (
@@ -167,7 +176,6 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
               </select>
             </div>
 
-            {/* Cascading Subcategory Dropdown */}
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1">
                 Subcategory *
@@ -178,7 +186,7 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
                   setFormData((prev) => ({ ...prev, subcategory: e.target.value }))
                 }
                 disabled={!formData.category}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm disabled:bg-slate-100 disabled:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm disabled:bg-slate-100 disabled:text-slate-400 focus:border-emerald-500 focus:outline-none"
               >
                 <option value="">
                   {formData.category
@@ -212,7 +220,7 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
               onChange={(e) =>
                 setFormData((prev) => ({ ...prev, title: e.target.value }))
               }
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
             />
           </div>
 
@@ -231,7 +239,7 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
               onChange={(e) =>
                 setFormData((prev) => ({ ...prev, description: e.target.value }))
               }
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
             />
           </div>
         </div>
@@ -271,10 +279,14 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
             {(formData.pricingType === "fixed" || formData.pricingType === "hourly") && (
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">
-                  {formData.pricingType === "hourly" ? "Hourly Rate ($ CAD) *" : "Price ($ CAD) *"}
+                  {formData.pricingType === "hourly"
+                    ? "Hourly Rate ($ CAD) *"
+                    : "Price ($ CAD) *"}
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-2.5 text-slate-400 font-semibold">$</span>
+                  <span className="absolute left-3 top-2.5 text-slate-400 font-semibold">
+                    $
+                  </span>
                   <input
                     type="number"
                     min="0"
@@ -314,7 +326,7 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
         {/* STEP 4: PHOTO PREVIEWS */}
         <div>
           <label className="block text-sm font-semibold text-slate-700 mb-2">
-            Photos (Up to 6 images)
+            Photos (Up to 4 images)
           </label>
           <div className="flex flex-wrap gap-3 items-center">
             <label className="w-24 h-24 rounded-lg border-2 border-dashed border-slate-300 hover:border-emerald-500 flex flex-col items-center justify-center cursor-pointer bg-slate-50 text-slate-500 hover:text-emerald-600 transition-colors">
@@ -332,7 +344,7 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
             {formData.images.map((imgUrl, idx) => (
               <div
                 key={idx}
-                className="relative w-24 h-24 rounded-lg overflow-hidden border border-slate-200 group"
+                className="relative w-24 h-24 rounded-lg overflow-hidden border border-slate-200"
               >
                 <img src={imgUrl} alt="Preview" className="w-full h-full object-cover" />
                 <button
@@ -347,14 +359,13 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
           </div>
         </div>
 
-        {/* SUBMIT BUTTON */}
         <div className="pt-2 flex items-center justify-end gap-3 border-t border-slate-200">
           <button
             type="submit"
             disabled={isSubmitting}
-            className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-6 py-3 rounded-lg shadow-sm transition-all text-sm"
+            className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-400 text-white font-bold px-6 py-3 rounded-lg shadow-sm transition-all text-sm"
           >
-            {isSubmitting ? "Publishing..." : "Publish Listing to Marketplace"}
+            {isSubmitting ? "Saving to MongoDB..." : "Publish Listing to GoGyMarket"}
           </button>
         </div>
       </form>
