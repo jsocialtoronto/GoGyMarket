@@ -1,34 +1,53 @@
 // client/src/components/PostListingForm.jsx
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { MARKETPLACE_CATEGORIES, PRICING_TYPES } from "../config/categoriesConfig";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+// Automatically removes any accidental trailing slash from VITE_API_URL
+const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:5000").replace(/\/$/, "");
 
-export default function PostListingForm({ currentUser, onPublishSuccess }) {
+export default function PostListingForm({
+  currentUser,
+  initialCategory = "",
+  initialSubcategory = "",
+  onPublishSuccess
+}) {
   const categoryNames = Object.keys(MARKETPLACE_CATEGORIES);
 
   const [formData, setFormData] = useState({
     title: "",
-    category: "",
-    subcategory: "",
-    pricingType: "fixed",
+    category: initialCategory,
+    subcategory: initialSubcategory,
+    pricingType: initialCategory === "Services" ? "hourly" : "fixed",
     price: "",
     location: currentUser.location || "Toronto, ON",
     description: "",
     images: []
   });
 
+  // Sync if user clicked a category from the Search sidebar
+  useEffect(() => {
+    if (initialCategory) {
+      setFormData((prev) => ({
+        ...prev,
+        category: initialCategory,
+        subcategory: initialSubcategory || "",
+        pricingType: initialCategory === "Services" ? "hourly" : "fixed"
+      }));
+    }
+  }, [initialCategory, initialSubcategory]);
+
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const availableSubcategories = formData.category
-    ? MARKETPLACE_CATEGORIES[formData.category]
+    ? MARKETPLACE_CATEGORIES[formData.category] || []
     : [];
 
   const isService = formData.category === "Services";
 
   const handleCategoryChange = (e) => {
     const selectedCategory = e.target.value;
+    setError("");
     setFormData((prev) => ({
       ...prev,
       category: selectedCategory,
@@ -37,7 +56,6 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
     }));
   };
 
-  // Convert uploaded photos to Base64 strings so they save in MongoDB
   const handleImageUpload = (e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
@@ -66,12 +84,17 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
     setError("");
 
     if (!formData.category || !formData.subcategory) {
-      setError("Please select both a Main Category and a Subcategory.");
+      setError("Please select both a Main Category and a Subcategory in Step 1.");
       return;
     }
 
-    if (!formData.title.trim() || !formData.description.trim()) {
-      setError("Please provide both a listing title and a description.");
+    if (!formData.title.trim()) {
+      setError("Please enter a Listing Title in Step 2.");
+      return;
+    }
+
+    if (!formData.description.trim()) {
+      setError("Please enter a Description in Step 2.");
       return;
     }
 
@@ -79,7 +102,7 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
       (formData.pricingType === "fixed" || formData.pricingType === "hourly") &&
       (formData.price === "" || Number(formData.price) < 0)
     ) {
-      setError("Please enter a valid dollar amount.");
+      setError("Please enter a dollar amount in the Price box (or choose 'Free').");
       return;
     }
 
@@ -115,7 +138,8 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
       });
 
       if (!res.ok) {
-        throw new Error("Server returned an error while saving your listing.");
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Server error (${res.status})`);
       }
 
       const savedListing = await res.json();
@@ -124,7 +148,7 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
     } catch (err) {
       setIsSubmitting(false);
       setError(
-        "Could not reach the Render server. Make sure VITE_API_URL is set in Vercel and Render has finished deploying."
+        `Could not save to server (${API_BASE}). Check that VITE_API_URL in Vercel matches your Render URL.`
       );
     }
   };
@@ -135,7 +159,7 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
         <div>
           <h2 className="text-lg font-bold">Post a Listing on GoGyMarket</h2>
           <p className="text-xs text-slate-400">
-            List a product or service in our predefined marketplace categories
+            Complete the steps below and click Publish at the bottom
           </p>
         </div>
         {isService && (
@@ -145,16 +169,10 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
         )}
       </div>
 
-      <form onSubmit={handleSubmit} className="p-6 space-y-6">
-        {error && (
-          <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg font-medium">
-            ⚠️ {error}
-          </div>
-        )}
-
+      <form onSubmit={handleSubmit} noValidate className="p-6 space-y-6">
         {/* STEP 1: CASCADING CATEGORY & SUBCATEGORY */}
-        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">
+        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
             Step 1: Choose Category
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -182,9 +200,10 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
               </label>
               <select
                 value={formData.subcategory}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, subcategory: e.target.value }))
-                }
+                onChange={(e) => {
+                  setError("");
+                  setFormData((prev) => ({ ...prev, subcategory: e.target.value }));
+                }}
                 disabled={!formData.category}
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm disabled:bg-slate-100 disabled:text-slate-400 focus:border-emerald-500 focus:outline-none"
               >
@@ -201,10 +220,23 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
               </select>
             </div>
           </div>
+
+          {/* Instant visual confirmation when Subcategory is chosen */}
+          {formData.category && formData.subcategory && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold px-3 py-2 rounded-lg flex items-center justify-between">
+              <span>
+                ✅ Selected: {formData.category} › {formData.subcategory}
+              </span>
+              <span className="text-emerald-600">Now fill in Step 2 & 3 below ↓</span>
+            </div>
+          )}
         </div>
 
         {/* STEP 2: LISTING TITLE & DESCRIPTION */}
         <div className="space-y-4">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+            Step 2: Item Details
+          </h3>
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1">
               {isService ? "Service Headline *" : "Listing Title *"}
@@ -214,7 +246,7 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
               placeholder={
                 isService
                   ? "e.g., Licensed Electrician - Panel Upgrades & EV Chargers"
-                  : "e.g., iPhone 15 Pro 256GB Unlocked - Mint Condition"
+                  : "e.g., iPad Pro 11-inch 256GB Wi-Fi - Mint Condition"
               }
               value={formData.title}
               onChange={(e) =>
@@ -233,7 +265,7 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
               placeholder={
                 isService
                   ? "Describe your experience, service area, minimum call-out fee, and availability..."
-                  : "Include condition, dimensions, brand, and pickup details..."
+                  : "Include condition, storage size, accessories included, and pickup area..."
               }
               value={formData.description}
               onChange={(e) =>
@@ -247,7 +279,7 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
         {/* STEP 3: DYNAMIC PRICING & LOCATION */}
         <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-4">
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-            Step 2: Pricing & Location
+            Step 3: Pricing & Location
           </h3>
 
           <div className="flex flex-wrap gap-2">
@@ -326,7 +358,7 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
         {/* STEP 4: PHOTO PREVIEWS */}
         <div>
           <label className="block text-sm font-semibold text-slate-700 mb-2">
-            Photos (Up to 4 images)
+            Step 4: Photos (Optional — Up to 4 images)
           </label>
           <div className="flex flex-wrap gap-3 items-center">
             <label className="w-24 h-24 rounded-lg border-2 border-dashed border-slate-300 hover:border-emerald-500 flex flex-col items-center justify-center cursor-pointer bg-slate-50 text-slate-500 hover:text-emerald-600 transition-colors">
@@ -359,11 +391,18 @@ export default function PostListingForm({ currentUser, onPublishSuccess }) {
           </div>
         </div>
 
+        {/* ERROR MESSAGE SHOWN RIGHT ABOVE THE SUBMIT BUTTON */}
+        {error && (
+          <div className="p-3.5 bg-red-50 border border-red-300 text-red-700 text-sm rounded-lg font-semibold">
+            ⚠️ {error}
+          </div>
+        )}
+
         <div className="pt-2 flex items-center justify-end gap-3 border-t border-slate-200">
           <button
             type="submit"
             disabled={isSubmitting}
-            className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-400 text-white font-bold px-6 py-3 rounded-lg shadow-sm transition-all text-sm"
+            className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-400 text-white font-bold px-6 py-3 rounded-lg shadow-sm transition-all text-sm"
           >
             {isSubmitting ? "Saving to MongoDB..." : "Publish Listing to GoGyMarket"}
           </button>
