@@ -2,7 +2,6 @@
 import React, { useState, useEffect } from "react";
 import { MARKETPLACE_CATEGORIES, PRICING_TYPES } from "../config/categoriesConfig";
 
-// Automatically removes any accidental trailing slash from VITE_API_URL
 const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:5000").replace(/\/$/, "");
 
 export default function PostListingForm({
@@ -24,7 +23,6 @@ export default function PostListingForm({
     images: []
   });
 
-  // Sync if user clicked a category from the Search sidebar
   useEffect(() => {
     if (initialCategory) {
       setFormData((prev) => ({
@@ -44,6 +42,12 @@ export default function PostListingForm({
     : [];
 
   const isService = formData.category === "Services";
+
+  // NEW RULE: Filter out "hourly" if the category is not Services
+  const availablePricingTypes = PRICING_TYPES.filter((type) => {
+    if (type.id === "hourly") return isService;
+    return true;
+  });
 
   const handleCategoryChange = (e) => {
     const selectedCategory = e.target.value;
@@ -139,7 +143,7 @@ export default function PostListingForm({
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || `Server error (${res.status})`);
+        throw new Error(errData.error || `Server responded with status ${res.status}`);
       }
 
       const savedListing = await res.json();
@@ -147,9 +151,7 @@ export default function PostListingForm({
       onPublishSuccess(savedListing);
     } catch (err) {
       setIsSubmitting(false);
-      setError(
-        `Could not save to server (${API_BASE}). Check that VITE_API_URL in Vercel matches your Render URL.`
-      );
+      setError(`Publish failed: ${err.message}`);
     }
   };
 
@@ -221,7 +223,6 @@ export default function PostListingForm({
             </div>
           </div>
 
-          {/* Instant visual confirmation when Subcategory is chosen */}
           {formData.category && formData.subcategory && (
             <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold px-3 py-2 rounded-lg flex items-center justify-between">
               <span>
@@ -283,7 +284,7 @@ export default function PostListingForm({
           </h3>
 
           <div className="flex flex-wrap gap-2">
-            {PRICING_TYPES.map((type) => (
+            {availablePricingTypes.map((type) => (
               <label
                 key={type.id}
                 className={`cursor-pointer px-3 py-2 rounded-lg border text-xs sm:text-sm font-medium transition-all ${
@@ -391,7 +392,6 @@ export default function PostListingForm({
           </div>
         </div>
 
-        {/* ERROR MESSAGE SHOWN RIGHT ABOVE THE SUBMIT BUTTON */}
         {error && (
           <div className="p-3.5 bg-red-50 border border-red-300 text-red-700 text-sm rounded-lg font-semibold">
             ⚠️ {error}
