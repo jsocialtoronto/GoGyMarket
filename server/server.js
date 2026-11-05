@@ -239,6 +239,41 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
   }
 });
 
+// POST calculate shipping distance using Google Maps
+app.post("/api/shipping-quote", async (req, res) => {
+  try {
+    const { origin, destination } = req.body;
+    
+    if (!process.env.GOOGLE_MAPS_API_KEY) {
+      return res.status(500).json({ error: "Google Maps API key missing in Render Environment." });
+    }
+
+    const mapUrl = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(origin)}&destinations=${encodeURIComponent(destination)}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
+    
+    const response = await fetch(mapUrl);
+    const data = await response.json();
+
+    if (data.status === "OK" && data.rows[0].elements[0].status === "OK") {
+      const distanceMeters = data.rows[0].elements[0].distance.value;
+      const distanceKm = Math.ceil(distanceMeters / 1000); // Round up to nearest km
+      
+      // Module 2 Formula: $20 GYD per 1 km radius
+      const shippingCost = distanceKm * 20;
+
+      res.json({
+        success: true,
+        distanceKm,
+        shippingCost,
+        formattedDistance: data.rows[0].elements[0].distance.text
+      });
+    } else {
+      res.status(400).json({ error: "Could not calculate driving distance between these locations." });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==========================================
 // 4. DATABASE CONNECTION & SERVER START
 // ==========================================
