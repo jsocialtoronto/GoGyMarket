@@ -6,7 +6,6 @@ require("dotenv").config();
 
 const app = express();
 
-// Bulletproof CORS: Allows https://gogymarket.vercel.app, preview URLs, and localhost
 app.use(
   cors({
     origin: true,
@@ -33,6 +32,11 @@ const listingSchema = new mongoose.Schema(
     },
     price: { type: Number, default: 0 },
     location: { type: String, required: true },
+    
+    // NEW: Module 2 Delivery Fields
+    deliveryMethods: { type: [String], default: ["pickup"] },
+    deliveryFee: { type: Number, default: 0 },
+    
     description: { type: String, required: true },
     images: [{ type: String }],
     status: {
@@ -83,6 +87,8 @@ async function seedInitialData() {
           pricingType: "fixed",
           price: 165,
           location: "Midtown Toronto, ON",
+          deliveryMethods: ["pickup", "delivery"],
+          deliveryFee: 15,
           description:
             "Includes both tools, two 20V batteries, charger, and hard carrying case. Works like new.",
           images: [
@@ -99,6 +105,8 @@ async function seedInitialData() {
           pricingType: "hourly",
           price: 90,
           location: "Toronto, ON",
+          deliveryMethods: [],
+          deliveryFee: 0,
           description:
             "ESA certified residential & commercial electrical work, pot lights, and EV charger installation.",
           images: [
@@ -106,7 +114,7 @@ async function seedInitialData() {
           ],
           status: "active"
         }
-        ]);
+      ]);
       console.log("Seeded initial GoGyMarket listings into MongoDB");
     }
   } catch (err) {
@@ -117,7 +125,6 @@ async function seedInitialData() {
 // ==========================================
 // 3. API ROUTES
 // ==========================================
-
 app.get("/", (req, res) => {
   res.send("GoGyMarket API is live. Visit /api/health for status.");
 });
@@ -134,9 +141,7 @@ app.get("/api/health", (req, res) => {
 app.get("/api/listings", async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({
-        error: "Database is not connected yet. Check MONGO_URI and MongoDB Network Access (0.0.0.0/0)."
-      });
+      return res.status(503).json({ error: "Database not connected." });
     }
     const listings = await Listing.find().sort({ createdAt: -1 });
     res.json(listings);
@@ -148,9 +153,7 @@ app.get("/api/listings", async (req, res) => {
 app.post("/api/listings", async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({
-        error: "MongoDB is not connected on Render. Make sure MONGO_URI is set in Render Environment and 0.0.0.0/0 is enabled in MongoDB Network Access."
-      });
+      return res.status(503).json({ error: "MongoDB is not connected on Render." });
     }
     const newListing = await Listing.create(req.body);
     res.status(201).json(newListing);
@@ -247,8 +250,6 @@ if (process.env.MONGO_URI) {
       await seedInitialData();
     })
     .catch((err) => console.error("❌ MongoDB connection error:", err.message));
-} else {
-  console.warn("⚠️ MONGO_URI environment variable is not set in Render!");
 }
 
 const PORT = process.env.PORT || 5000;
