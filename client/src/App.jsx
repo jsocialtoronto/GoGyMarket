@@ -71,12 +71,12 @@ export default function App() {
     setSelectedListing(null);
   }, [activeTab]);
 
-  const formatPrice = (item) => {
-    if (item.pricingType === "free") return "FREE";
-    if (item.pricingType === "contact_for_quote") return "Contact for Quote";
-    if (item.pricingType === "hourly") return `$${item.price}/hr`;
-    return `$${Number(item.price || 0).toLocaleString()}`;
-  };
+ const formatPrice = (item) => {
+  if (item.pricingType === "free") return "FREE";
+  if (item.pricingType === "contact_for_quote") return "Contact for Quote";
+  if (item.pricingType === "hourly") return `$${Number(item.price || 0).toLocaleString()} GYD/hr`;
+  return `$${Number(item.price || 0).toLocaleString()} GYD`;
+};
 
   const handlePublishSuccess = (savedListing) => {
     setListings((prev) => [savedListing, ...prev]);
