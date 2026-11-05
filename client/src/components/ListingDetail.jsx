@@ -2,6 +2,8 @@
 import React, { useState, useEffect } from "react";
 import { LISTING_STATUSES } from "../config/categoriesConfig";
 
+const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:5000").replace(/\/$/, "");
+
 export default function ListingDetail({
   listing,
   onClose,
@@ -11,12 +13,18 @@ export default function ListingDetail({
   formatPrice,
   currentUser
 }) {
-  // Always default the main gallery image to the first photo
   const [mainImageIndex, setMainImageIndex] = useState(0);
+  
+  // Shipping Calculator State
+  const [shippingCost, setShippingCost] = useState(null);
+  const [shippingDistance, setShippingDistance] = useState(null);
+  const [isCalculating, setIsCalculating] = useState(false);
+  const [calcError, setCalcError] = useState("");
 
-  // Reset the gallery back to image 0 if the user clicks a different listing
   useEffect(() => {
     setMainImageIndex(0);
+    setShippingCost(null);
+    setCalcError("");
   }, [listing._id]);
 
   const images = listing.images?.length > 0
@@ -26,9 +34,32 @@ export default function ListingDetail({
   const statusMeta = LISTING_STATUSES[listing.status] || LISTING_STATUSES.active;
   const isOwner = listing.sellerId === currentUser.id;
 
+  const handleCalculateShipping = async () => {
+    setIsCalculating(true);
+    setCalcError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/shipping-quote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          origin: listing.location,
+          destination: currentUser.location // Using the logged-in user's location
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to calculate distance");
+      
+      setShippingDistance(data.formattedDistance);
+      setShippingCost(data.shippingCost);
+    } catch (err) {
+      setCalcError(err.message);
+    } finally {
+      setIsCalculating(false);
+    }
+  };
+
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-      {/* Top Navigation Bar */}
       <div className="bg-slate-50 border-b border-slate-200 px-4 py-3 flex items-center justify-between sticky top-0 z-10">
         <button
           onClick={onClose}
@@ -44,25 +75,14 @@ export default function ListingDetail({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 lg:divide-x divide-slate-200">
-        {/* LEFT COLUMN: Photo Gallery */}
         <div className="p-6 bg-slate-50/50 flex flex-col gap-4">
-          {/* Main Hero Image */}
           <div className="w-full aspect-square bg-slate-100 rounded-xl overflow-hidden border border-slate-200 relative group">
             <img
               src={images[mainImageIndex]}
               alt={listing.title}
               className="w-full h-full object-contain bg-black/5"
             />
-            {listing.status !== "active" && (
-              <div className="absolute inset-0 bg-white/60 backdrop-blur-sm flex items-center justify-center">
-                <span className={`px-4 py-2 rounded-lg border-2 font-black text-lg shadow-sm ${statusMeta.badgeClass}`}>
-                  {statusMeta.label.toUpperCase()}
-                </span>
-              </div>
-            )}
           </div>
-
-          {/* Thumbnail Strip */}
           {images.length > 1 && (
             <div className="flex gap-3 overflow-x-auto pb-2">
               {images.map((img, idx) => (
@@ -70,9 +90,7 @@ export default function ListingDetail({
                   key={idx}
                   onClick={() => setMainImageIndex(idx)}
                   className={`relative w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden border-2 transition-all ${
-                    mainImageIndex === idx
-                      ? "border-emerald-500 shadow-md"
-                      : "border-slate-200 hover:border-slate-400 opacity-70 hover:opacity-100"
+                    mainImageIndex === idx ? "border-emerald-500 shadow-md" : "border-slate-200 opacity-70 hover:opacity-100"
                   }`}
                 >
                   <img src={img} alt={`Thumbnail ${idx + 1}`} className="w-full h-full object-cover" />
@@ -82,7 +100,6 @@ export default function ListingDetail({
           )}
         </div>
 
-        {/* RIGHT COLUMN: Details & Actions */}
         <div className="p-6 flex flex-col">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -93,62 +110,64 @@ export default function ListingDetail({
                 {listing.title}
               </h1>
             </div>
-            <button
-              onClick={() => onToggleFavourite(listing._id)}
-              className="flex-shrink-0 w-12 h-12 rounded-full border border-slate-200 flex items-center justify-center bg-slate-50 hover:bg-slate-100 transition-colors shadow-sm"
-              title="Save to Favourites"
-            >
+            <button onClick={() => onToggleFavourite(listing._id)} className="w-12 h-12 rounded-full border border-slate-200 flex items-center justify-center bg-slate-50 hover:bg-slate-100">
               <span className="text-xl">{isFavourite ? "❤️" : "🤍"}</span>
             </button>
           </div>
 
           <div className="flex items-center gap-4 mt-4 text-sm font-medium text-slate-600">
-            <span className="flex items-center gap-1">
-              📍 {listing.location}
-            </span>
-            <span>•</span>
-            <span>
-              Posted {new Date(listing.createdAt).toLocaleDateString()}
-            </span>
+            <span>📍 {listing.location}</span>
+          </div>
+
+          {/* MODULE 2: DELIVERY & SHIPPING CALCULATOR */}
+          <div className="mt-6 flex flex-col gap-2">
+            {listing.deliveryMethods?.includes("pickup") && (
+              <div className="inline-flex items-center gap-2 bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-bold w-fit">
+                <span>🏪</span> Local Pickup Available
+              </div>
+            )}
+            {listing.deliveryMethods?.includes("delivery") && (
+              <div className="inline-flex items-center gap-2 bg-emerald-50 text-emerald-800 border border-emerald-200 px-3 py-1.5 rounded-lg text-sm font-bold w-fit">
+                <span>🚙</span> Seller Delivers (Fee: ${listing.deliveryFee} GYD)
+              </div>
+            )}
+            
+            {listing.deliveryMethods?.includes("shipping") && !isOwner && (
+              <div className="mt-2 bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-indigo-900 font-bold text-sm">
+                    <span>📦</span> Shipping Available
+                  </div>
+                  {shippingCost === null && !isCalculating && (
+                    <button onClick={handleCalculateShipping} className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-1.5 rounded-md shadow-sm">
+                      Calculate Cost
+                    </button>
+                  )}
+                </div>
+                
+                {isCalculating && <p className="text-xs text-indigo-600 mt-2 font-medium">Calculating distance via Google Maps...</p>}
+                
+                {shippingCost !== null && (
+                  <div className="mt-3 pt-3 border-t border-indigo-200/50 flex justify-between items-center">
+                    <span className="text-xs font-semibold text-indigo-700">Distance: {shippingDistance}</span>
+                    <span className="text-sm font-black text-indigo-900">Est. Shipping: ${shippingCost.toLocaleString()} GYD</span>
+                  </div>
+                )}
+
+                {calcError && <p className="text-xs text-red-600 mt-2 font-semibold">⚠️ {calcError}</p>}
+              </div>
+            )}
           </div>
 
           <div className="mt-8 pt-6 border-t border-slate-200 flex-1">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-3">
-              Description
-            </h3>
-            <p className="text-slate-700 whitespace-pre-wrap leading-relaxed">
-              {listing.description}
-            </p>
+            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-3">Description</h3>
+            <p className="text-slate-700 whitespace-pre-wrap leading-relaxed">{listing.description}</p>
           </div>
 
-          {/* Seller Card & Call To Action */}
           <div className="mt-8 bg-slate-50 rounded-xl border border-slate-200 p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-emerald-600 text-white font-bold flex items-center justify-center">
-                  {listing.sellerName?.charAt(0) || "U"}
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Seller</p>
-                  <p className="font-bold text-slate-900">{listing.sellerName}</p>
-                </div>
-              </div>
-            </div>
-
-            {isOwner ? (
-              <div className="bg-emerald-100 border border-emerald-300 text-emerald-800 text-sm font-bold px-4 py-3 rounded-lg text-center">
-                This is your listing
-              </div>
-            ) : listing.status !== "active" ? (
-              <div className="bg-slate-200 border border-slate-300 text-slate-600 text-sm font-bold px-4 py-3 rounded-lg text-center">
-                Item is no longer available
-              </div>
-            ) : (
-              <button
-                onClick={() => onMessageSeller(listing)}
-                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-lg py-3.5 rounded-lg shadow-md transition-all flex items-center justify-center gap-2"
-              >
-                <span>💬</span> Message Seller
+            {!isOwner && listing.status === "active" && (
+              <button onClick={() => onMessageSeller(listing)} className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-lg py-3.5 rounded-lg shadow-md transition-all">
+                💬 Message Seller
               </button>
             )}
           </div>
