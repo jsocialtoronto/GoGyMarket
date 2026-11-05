@@ -314,8 +314,8 @@ export default function PostListingForm({
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">
                   {formData.pricingType === "hourly"
-                    ? "Hourly Rate ($ CAD) *"
-                    : "Price ($ CAD) *"}
+                    ? "Hourly Rate ($ GYD) *"
+                    : "Price ($ GYD) *"}
                 </label>
                 <div className="relative">
                   <span className="absolute left-3 top-2.5 text-slate-400 font-semibold">
