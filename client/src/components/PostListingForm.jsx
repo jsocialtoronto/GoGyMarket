@@ -20,7 +20,10 @@ export default function PostListingForm({
     price: "",
     location: currentUser.location || "Toronto, ON",
     description: "",
-    images: []
+    images: [],
+    // NEW: Module 2 Default Values
+    deliveryMethods: ["pickup"], 
+    deliveryFee: ""
   });
 
   useEffect(() => {
@@ -43,7 +46,6 @@ export default function PostListingForm({
 
   const isService = formData.category === "Services";
 
-  // NEW RULE: Filter out "hourly" if the category is not Services
   const availablePricingTypes = PRICING_TYPES.filter((type) => {
     if (type.id === "hourly") return isService;
     return true;
@@ -56,8 +58,22 @@ export default function PostListingForm({
       ...prev,
       category: selectedCategory,
       subcategory: "",
-      pricingType: selectedCategory === "Services" ? "hourly" : "fixed"
+      pricingType: selectedCategory === "Services" ? "hourly" : "fixed",
+      // Reset delivery options if they switch to a Service
+      deliveryMethods: selectedCategory === "Services" ? [] : ["pickup"]
     }));
+  };
+
+  // Toggle delivery methods in the array
+  const handleDeliveryToggle = (method) => {
+    setFormData((prev) => {
+      const currentMethods = prev.deliveryMethods;
+      if (currentMethods.includes(method)) {
+        return { ...prev, deliveryMethods: currentMethods.filter(m => m !== method) };
+      } else {
+        return { ...prev, deliveryMethods: [...currentMethods, method] };
+      }
+    });
   };
 
   const handleImageUpload = (e) => {
@@ -92,13 +108,8 @@ export default function PostListingForm({
       return;
     }
 
-    if (!formData.title.trim()) {
-      setError("Please enter a Listing Title in Step 2.");
-      return;
-    }
-
-    if (!formData.description.trim()) {
-      setError("Please enter a Description in Step 2.");
+    if (!formData.title.trim() || !formData.description.trim()) {
+      setError("Please enter a Title and Description in Step 2.");
       return;
     }
 
@@ -107,6 +118,11 @@ export default function PostListingForm({
       (formData.price === "" || Number(formData.price) < 0)
     ) {
       setError("Please enter a dollar amount in the Price box (or choose 'Free').");
+      return;
+    }
+
+    if (!isService && formData.deliveryMethods.length === 0) {
+      setError("Please select at least one Delivery Option (e.g., Local Pickup).");
       return;
     }
 
@@ -124,6 +140,9 @@ export default function PostListingForm({
           ? 0
           : Number(formData.price),
       location: formData.location.trim(),
+      // Append Module 2 details
+      deliveryMethods: formData.deliveryMethods,
+      deliveryFee: formData.deliveryMethods.includes("delivery") ? Number(formData.deliveryFee || 0) : 0,
       description: formData.description.trim(),
       images:
         formData.images.length > 0
@@ -156,7 +175,7 @@ export default function PostListingForm({
   };
 
   return (
-    <div className="max-w-3xl mx-auto bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+    <div className="max-w-3xl mx-auto bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-10">
       <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
         <div>
           <h2 className="text-lg font-bold">Post a Listing on GoGyMarket</h2>
@@ -171,9 +190,10 @@ export default function PostListingForm({
         )}
       </div>
 
-      <form onSubmit={handleSubmit} noValidate className="p-6 space-y-6">
+      <form onSubmit={handleSubmit} noValidate className="p-6 space-y-8">
+        
         {/* STEP 1: CASCADING CATEGORY & SUBCATEGORY */}
-        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
+        <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-4">
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
             Step 1: Choose Category
           </h3>
@@ -222,19 +242,10 @@ export default function PostListingForm({
               </select>
             </div>
           </div>
-
-          {formData.category && formData.subcategory && (
-            <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold px-3 py-2 rounded-lg flex items-center justify-between">
-              <span>
-                ✅ Selected: {formData.category} › {formData.subcategory}
-              </span>
-              <span className="text-emerald-600">Now fill in Step 2 & 3 below ↓</span>
-            </div>
-          )}
         </div>
 
         {/* STEP 2: LISTING TITLE & DESCRIPTION */}
-        <div className="space-y-4">
+        <div className="space-y-4 px-2">
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
             Step 2: Item Details
           </h3>
@@ -278,7 +289,7 @@ export default function PostListingForm({
         </div>
 
         {/* STEP 3: DYNAMIC PRICING & LOCATION */}
-        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-4">
+        <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-5">
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
             Step 3: Pricing & Location
           </h3>
@@ -356,13 +367,71 @@ export default function PostListingForm({
           </div>
         </div>
 
-        {/* STEP 4: PHOTO PREVIEWS */}
-        <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-2">
-            Step 4: Photos (Optional — Up to 4 images)
+        {/* STEP 4: DELIVERY OPTIONS (HIDDEN FOR SERVICES) */}
+        {!isService && (
+          <div className="space-y-4 px-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Step 4: Delivery Options
+            </h3>
+            
+            <div className="flex flex-col gap-3">
+              <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={formData.deliveryMethods.includes("pickup")}
+                  onChange={() => handleDeliveryToggle("pickup")}
+                  className="w-5 h-5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
+                />
+                <span className="font-semibold text-slate-800 text-sm">Local Pickup (Free)</span>
+              </label>
+
+              <div className={`p-3 rounded-lg border transition-colors ${formData.deliveryMethods.includes("delivery") ? "border-emerald-300 bg-emerald-50/50" : "border-slate-200 hover:bg-slate-50"}`}>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.deliveryMethods.includes("delivery")}
+                    onChange={() => handleDeliveryToggle("delivery")}
+                    className="w-5 h-5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
+                  />
+                  <span className="font-semibold text-slate-800 text-sm">I can deliver to the buyer</span>
+                </label>
+                
+                {formData.deliveryMethods.includes("delivery") && (
+                  <div className="mt-3 pl-8 flex items-center gap-2">
+                    <span className="text-sm font-medium text-slate-600">Delivery Fee: $</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="e.g. 15"
+                      value={formData.deliveryFee}
+                      onChange={(e) => setFormData(prev => ({...prev, deliveryFee: e.target.value}))}
+                      className="w-24 rounded border border-slate-300 px-2 py-1 text-sm focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={formData.deliveryMethods.includes("shipping")}
+                  onChange={() => handleDeliveryToggle("shipping")}
+                  className="w-5 h-5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
+                />
+                <span className="font-semibold text-slate-800 text-sm">Shipping Available (Buyer pays postage)</span>
+              </label>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 5: PHOTO PREVIEWS */}
+        <div className="bg-slate-50 p-5 rounded-xl border border-slate-200">
+          <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">
+            {isService ? "Step 4: Photos (Optional)" : "Step 5: Photos (Optional - Up to 4)"}
           </label>
           <div className="flex flex-wrap gap-3 items-center">
-            <label className="w-24 h-24 rounded-lg border-2 border-dashed border-slate-300 hover:border-emerald-500 flex flex-col items-center justify-center cursor-pointer bg-slate-50 text-slate-500 hover:text-emerald-600 transition-colors">
+            <label className="w-24 h-24 rounded-lg border-2 border-dashed border-slate-300 hover:border-emerald-500 flex flex-col items-center justify-center cursor-pointer bg-white text-slate-500 hover:text-emerald-600 transition-colors">
               <span className="text-xl">📷</span>
               <span className="text-[11px] font-semibold mt-1">Add Photo</span>
               <input
@@ -377,13 +446,13 @@ export default function PostListingForm({
             {formData.images.map((imgUrl, idx) => (
               <div
                 key={idx}
-                className="relative w-24 h-24 rounded-lg overflow-hidden border border-slate-200"
+                className="relative w-24 h-24 rounded-lg overflow-hidden border border-slate-200 bg-white"
               >
                 <img src={imgUrl} alt="Preview" className="w-full h-full object-cover" />
                 <button
                   type="button"
                   onClick={() => removeImage(idx)}
-                  className="absolute top-1 right-1 bg-slate-900/80 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center"
+                  className="absolute top-1 right-1 bg-slate-900/80 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center hover:bg-red-600 transition-colors"
                 >
                   ✕
                 </button>
@@ -393,16 +462,16 @@ export default function PostListingForm({
         </div>
 
         {error && (
-          <div className="p-3.5 bg-red-50 border border-red-300 text-red-700 text-sm rounded-lg font-semibold">
-            ⚠️ {error}
+          <div className="p-4 bg-red-50 border border-red-300 text-red-700 text-sm rounded-lg font-semibold flex items-center gap-2">
+            <span>⚠️</span> {error}
           </div>
         )}
 
-        <div className="pt-2 flex items-center justify-end gap-3 border-t border-slate-200">
+        <div className="pt-2 flex items-center justify-end gap-3">
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-400 text-white font-bold px-6 py-3 rounded-lg shadow-sm transition-all text-sm"
+            className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-400 text-white font-bold px-8 py-3.5 rounded-lg shadow-sm transition-all text-sm"
           >
             {isSubmitting ? "Saving to MongoDB..." : "Publish Listing to GoGyMarket"}
           </button>
