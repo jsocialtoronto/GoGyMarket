@@ -21,7 +21,6 @@ export default function PostListingForm({
     location: currentUser.location || "Toronto, ON",
     description: "",
     images: [],
-    // NEW: Module 2 Default Values
     deliveryMethods: ["pickup"], 
     deliveryFee: ""
   });
@@ -59,21 +58,13 @@ export default function PostListingForm({
       category: selectedCategory,
       subcategory: "",
       pricingType: selectedCategory === "Services" ? "hourly" : "fixed",
-      // Reset delivery options if they switch to a Service
       deliveryMethods: selectedCategory === "Services" ? [] : ["pickup"]
     }));
   };
 
-  // Toggle delivery methods in the array
-  const handleDeliveryToggle = (method) => {
-    setFormData((prev) => {
-      const currentMethods = prev.deliveryMethods;
-      if (currentMethods.includes(method)) {
-        return { ...prev, deliveryMethods: currentMethods.filter(m => m !== method) };
-      } else {
-        return { ...prev, deliveryMethods: [...currentMethods, method] };
-      }
-    });
+  // NEW: Sets exactly one delivery method instead of toggling multiple
+  const handleDeliveryChange = (method) => {
+    setFormData((prev) => ({ ...prev, deliveryMethods: [method] }));
   };
 
   const handleImageUpload = (e) => {
@@ -122,7 +113,7 @@ export default function PostListingForm({
     }
 
     if (!isService && formData.deliveryMethods.length === 0) {
-      setError("Please select at least one Delivery Option (e.g., Local Pickup).");
+      setError("Please select a Delivery Option.");
       return;
     }
 
@@ -140,7 +131,6 @@ export default function PostListingForm({
           ? 0
           : Number(formData.price),
       location: formData.location.trim(),
-      // Append Module 2 details
       deliveryMethods: formData.deliveryMethods,
       deliveryFee: formData.deliveryMethods.includes("delivery") ? Number(formData.deliveryFee || 0) : 0,
       description: formData.description.trim(),
@@ -367,7 +357,7 @@ export default function PostListingForm({
           </div>
         </div>
 
-        {/* STEP 4: DELIVERY OPTIONS (HIDDEN FOR SERVICES) */}
+        {/* STEP 4: DELIVERY OPTIONS (RADIO BUTTONS) */}
         {!isService && (
           <div className="space-y-4 px-2">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -377,10 +367,11 @@ export default function PostListingForm({
             <div className="flex flex-col gap-3">
               <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
                 <input
-                  type="checkbox"
+                  type="radio"
+                  name="deliveryMethod"
                   checked={formData.deliveryMethods.includes("pickup")}
-                  onChange={() => handleDeliveryToggle("pickup")}
-                  className="w-5 h-5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
+                  onChange={() => handleDeliveryChange("pickup")}
+                  className="w-5 h-5 text-emerald-600 border-slate-300 focus:ring-emerald-500"
                 />
                 <span className="font-semibold text-slate-800 text-sm">Local Pickup (Free)</span>
               </label>
@@ -388,10 +379,11 @@ export default function PostListingForm({
               <div className={`p-3 rounded-lg border transition-colors ${formData.deliveryMethods.includes("delivery") ? "border-emerald-300 bg-emerald-50/50" : "border-slate-200 hover:bg-slate-50"}`}>
                 <label className="flex items-center gap-3 cursor-pointer">
                   <input
-                    type="checkbox"
+                    type="radio"
+                    name="deliveryMethod"
                     checked={formData.deliveryMethods.includes("delivery")}
-                    onChange={() => handleDeliveryToggle("delivery")}
-                    className="w-5 h-5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
+                    onChange={() => handleDeliveryChange("delivery")}
+                    className="w-5 h-5 text-emerald-600 border-slate-300 focus:ring-emerald-500"
                   />
                   <span className="font-semibold text-slate-800 text-sm">I can deliver to the buyer</span>
                 </label>
@@ -403,7 +395,7 @@ export default function PostListingForm({
                       type="number"
                       min="0"
                       step="1"
-                      placeholder="e.g. 15"
+                      placeholder="e.g. 500"
                       value={formData.deliveryFee}
                       onChange={(e) => setFormData(prev => ({...prev, deliveryFee: e.target.value}))}
                       className="w-24 rounded border border-slate-300 px-2 py-1 text-sm focus:border-emerald-500 focus:outline-none"
@@ -414,12 +406,13 @@ export default function PostListingForm({
 
               <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
                 <input
-                  type="checkbox"
+                  type="radio"
+                  name="deliveryMethod"
                   checked={formData.deliveryMethods.includes("shipping")}
-                  onChange={() => handleDeliveryToggle("shipping")}
-                  className="w-5 h-5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
+                  onChange={() => handleDeliveryChange("shipping")}
+                  className="w-5 h-5 text-emerald-600 border-slate-300 focus:ring-emerald-500"
                 />
-                <span className="font-semibold text-slate-800 text-sm">Shipping Available (Buyer pays postage)</span>
+                <span className="font-semibold text-slate-800 text-sm">Shipping Available (Buyer pays delivery fee based on proximity)</span>
               </label>
             </div>
           </div>
