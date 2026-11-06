@@ -8,6 +8,7 @@ export default function ListingDetail({
   listing,
   onClose,
   onMessageSeller,
+  onAddToCart,
   isFavourite,
   onToggleFavourite,
   formatPrice,
@@ -15,11 +16,9 @@ export default function ListingDetail({
 }) {
   const [mainImageIndex, setMainImageIndex] = useState(0);
   
-  // Buyer Checkout State
-  const [deliveryMethod, setDeliveryMethod] = useState("pickup"); // "pickup" | "delivery"
+  const [deliveryMethod, setDeliveryMethod] = useState("pickup");
   const [buyerAddress, setBuyerAddress] = useState(currentUser.location || "");
   
-  // Shipping Math
   const [shippingCost, setShippingCost] = useState(null);
   const [shippingDistance, setShippingDistance] = useState(null);
   const [isCalculating, setIsCalculating] = useState(false);
@@ -54,7 +53,6 @@ export default function ListingDetail({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // Adding country context helps Google Maps route partial addresses
           origin: `${listing.location}, Canada`,
           destination: `${buyerAddress.trim()}, Canada`
         })
@@ -72,20 +70,22 @@ export default function ListingDetail({
     }
   };
 
-  const handleProceed = () => {
-    let intentMessage = `Hi ${listing.sellerName}, I would like to buy "${listing.title}".\n\n`;
-    
-    if (isService) {
-      intentMessage += `I am interested in booking this service.`;
-    } else if (deliveryMethod === "pickup") {
-      intentMessage += `I would like to arrange Local Pickup in ${listing.location}.`;
-    } else {
-      intentMessage += `I need this delivered to: ${buyerAddress}.\n`;
-      if (shippingCost !== null) {
-        intentMessage += `I see the delivery fee is $${shippingCost.toLocaleString()} GYD based on distance.`;
-      }
-    }
-    
+  // AMAZON STYLE: Add to Cart functionality
+  const handleAddToCart = () => {
+    const cartItem = {
+      ...listing,
+      cartItemId: Date.now().toString(), // Unique ID in case they add multiple things
+      deliveryMethod,
+      buyerAddress: deliveryMethod === "delivery" ? buyerAddress : "N/A",
+      shippingCost: deliveryMethod === "delivery" ? shippingCost : 0,
+      totalCost
+    };
+    onAddToCart(cartItem);
+  };
+
+  // SUPPORT STYLE: Direct messaging for questions only
+  const handleAskQuestion = () => {
+    const intentMessage = `Hi ${listing.sellerName}, I have a question about "${listing.title}":\n\n`;
     onMessageSeller({ ...listing, initialMessage: intentMessage });
   };
 
@@ -111,14 +111,9 @@ export default function ListingDetail({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 lg:divide-x divide-slate-200">
-        {/* LEFT COLUMN: Gallery & Description */}
         <div className="p-6 bg-slate-50/50 flex flex-col gap-4">
           <div className="w-full aspect-square bg-slate-100 rounded-xl overflow-hidden border border-slate-200 relative group">
-            <img
-              src={images[mainImageIndex]}
-              alt={listing.title}
-              className="w-full h-full object-contain bg-black/5"
-            />
+            <img src={images[mainImageIndex]} alt={listing.title} className="w-full h-full object-contain bg-black/5" />
           </div>
           {images.length > 1 && (
             <div className="flex gap-3 overflow-x-auto pb-2">
@@ -142,17 +137,11 @@ export default function ListingDetail({
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Buyer Checkout Flow */}
         <div className="p-6 flex flex-col bg-white">
           <div className="flex items-start justify-between gap-4 mb-6">
             <div>
-              <p className="text-3xl font-black text-emerald-700 tracking-tight">
-                {formatPrice(listing)}
-              </p>
-              <h1 className="text-xl font-bold text-slate-900 mt-2 leading-tight">
-                {listing.title}
-              </h1>
-              {/* Highlighted Seller Location */}
+              <p className="text-3xl font-black text-emerald-700 tracking-tight">{formatPrice(listing)}</p>
+              <h1 className="text-xl font-bold text-slate-900 mt-2 leading-tight">{listing.title}</h1>
               <div className="mt-3 inline-flex items-center gap-2 bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-bold border border-slate-200">
                 <span>📍</span> <span>Item Location: {listing.location}</span>
               </div>
@@ -169,10 +158,7 @@ export default function ListingDetail({
               <div className="flex flex-col gap-3">
                 <label className={`flex items-center gap-3 p-4 rounded-lg border-2 cursor-pointer transition-colors ${deliveryMethod === "pickup" ? "border-emerald-500 bg-emerald-50/30" : "border-slate-200 bg-white hover:border-slate-300"}`}>
                   <input 
-                    type="radio" 
-                    name="buyerDelivery" 
-                    checked={deliveryMethod === "pickup"}
-                    onChange={() => setDeliveryMethod("pickup")}
+                    type="radio" name="buyerDelivery" checked={deliveryMethod === "pickup"} onChange={() => setDeliveryMethod("pickup")}
                     className="w-5 h-5 text-emerald-600 focus:ring-emerald-500" 
                   />
                   <div>
@@ -183,10 +169,7 @@ export default function ListingDetail({
 
                 <label className={`flex items-center gap-3 p-4 rounded-lg border-2 cursor-pointer transition-colors ${deliveryMethod === "delivery" ? "border-emerald-500 bg-emerald-50/30" : "border-slate-200 bg-white hover:border-slate-300"}`}>
                   <input 
-                    type="radio" 
-                    name="buyerDelivery" 
-                    checked={deliveryMethod === "delivery"}
-                    onChange={() => setDeliveryMethod("delivery")}
+                    type="radio" name="buyerDelivery" checked={deliveryMethod === "delivery"} onChange={() => setDeliveryMethod("delivery")}
                     className="w-5 h-5 text-emerald-600 focus:ring-emerald-500" 
                   />
                   <div className="flex-1">
@@ -201,13 +184,8 @@ export default function ListingDetail({
                   <label className="block text-xs font-bold text-slate-700">Enter your full street address & city:</label>
                   <div className="flex gap-2">
                     <input 
-                      type="text" 
-                      placeholder="e.g. 15 Eastdale Avenue, Toronto"
-                      value={buyerAddress}
-                      onChange={(e) => {
-                        setBuyerAddress(e.target.value);
-                        setShippingCost(null);
-                      }}
+                      type="text" placeholder="e.g. 15 Eastdale Avenue, Toronto" value={buyerAddress}
+                      onChange={(e) => { setBuyerAddress(e.target.value); setShippingCost(null); }}
                       className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
                     />
                     <button 
@@ -255,19 +233,28 @@ export default function ListingDetail({
                 Item is no longer available
               </div>
             ) : (
-              <button
-                onClick={handleProceed}
-                disabled={deliveryMethod === "delivery" && shippingCost === null}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-400 text-white font-bold text-lg py-3.5 rounded-lg shadow-md transition-all flex items-center justify-center gap-2"
-              >
-                {deliveryMethod === "delivery" && shippingCost === null 
-                  ? "Calculate delivery to proceed" 
-                  : "💬 Message Seller to Buy"}
-              </button>
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={handleAddToCart}
+                  disabled={deliveryMethod === "delivery" && shippingCost === null}
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-400 text-white font-bold text-lg py-3.5 rounded-lg shadow-md transition-all flex items-center justify-center gap-2"
+                >
+                  {deliveryMethod === "delivery" && shippingCost === null 
+                    ? "Calculate delivery to add to cart" 
+                    : "🛒 Add to Cart"}
+                </button>
+
+                <button
+                  onClick={handleAskQuestion}
+                  className="w-full bg-white hover:bg-slate-100 text-slate-700 font-bold text-sm py-3 rounded-lg border border-slate-300 transition-all flex items-center justify-center gap-2"
+                >
+                  💬 Ask Seller a Question
+                </button>
+              </div>
             )}
             
             <div className="mt-4 flex items-center justify-center gap-2 text-xs text-slate-500 font-medium">
-              <span>👤 Seller: {listing.sellerName}</span>
+              <span>👤 Sold by: {listing.sellerName}</span>
             </div>
           </div>
         </div>
