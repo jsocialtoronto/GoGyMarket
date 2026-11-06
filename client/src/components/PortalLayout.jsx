@@ -34,15 +34,15 @@ export default function PortalLayout({
             </div>
           </div>
 
-          {/* Signed-in User Pill with Logout */}
+          {/* Signed-in User Pill with safe fallbacks and Logout */}
           <div className="flex items-center gap-3 bg-slate-900 px-3 py-1.5 rounded-full border border-slate-800">
             <div className="w-7 h-7 rounded-full bg-emerald-500 text-slate-950 font-bold flex items-center justify-center text-sm">
-              {currentUser.name.charAt(0)}
+              {(currentUser?.name || "U").charAt(0).toUpperCase()}
             </div>
             <div className="hidden sm:block text-left mr-2">
-              <p className="text-xs font-semibold leading-none">{currentUser.name}</p>
+              <p className="text-xs font-semibold leading-none">{currentUser?.name || "User"}</p>
               <p className="text-[11px] text-emerald-400 leading-tight truncate max-w-[100px]">
-                {currentUser.location}
+                {currentUser?.location || "Unknown"}
               </p>
             </div>
             <button 
