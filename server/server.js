@@ -325,7 +325,30 @@ if (process.env.MONGO_URI) {
     .connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 8000 })
     .then(async () => {
       console.log("✅ Connected to MongoDB Atlas (gogymarket)");
+      
+      // 1. Run the initial seed if the database is totally empty
       await seedInitialData();
+
+      // 2. Force-update the vague sample addresses to specific street addresses 
+      // so Google Maps Routes API can successfully calculate distances.
+      try {
+        await Listing.updateMany(
+          { sellerName: "Sarah K." },
+          { $set: { location: "1800 Sheppard Ave E, Toronto, ON" } }
+        );
+        await Listing.updateMany(
+          { sellerName: "Marcus T." },
+          { $set: { location: "290 Bremner Blvd, Toronto, ON" } }
+        );
+        await Listing.updateMany(
+          { sellerName: "Errol D." },
+          { $set: { location: "2033 Yonge Street, Toronto, ON" } }
+        );
+        console.log("✅ Sample addresses updated to specific street addresses.");
+      } catch (updateErr) {
+        console.error("Failed to update sample addresses:", updateErr);
+      }
+
     })
     .catch((err) => console.error("❌ MongoDB connection error:", err.message));
 } else {
