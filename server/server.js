@@ -6,6 +6,7 @@ require("dotenv").config();
 
 const app = express();
 
+// Bulletproof CORS: Allows https://gogymarket.vercel.app, preview URLs, and localhost
 app.use(
   cors({
     origin: true,
@@ -33,7 +34,7 @@ const listingSchema = new mongoose.Schema(
     price: { type: Number, default: 0 },
     location: { type: String, required: true },
     
-    // NEW: Module 2 Delivery Fields
+    // Module 2: Delivery Options
     deliveryMethods: { type: [String], default: ["pickup"] },
     deliveryFee: { type: Number, default: 0 },
     
@@ -125,6 +126,7 @@ async function seedInitialData() {
 // ==========================================
 // 3. API ROUTES
 // ==========================================
+
 app.get("/", (req, res) => {
   res.send("GoGyMarket API is live. Visit /api/health for status.");
 });
@@ -138,10 +140,13 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+// LISTINGS
 app.get("/api/listings", async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({ error: "Database not connected." });
+      return res.status(503).json({
+        error: "Database is not connected yet. Check MONGO_URI and MongoDB Network Access (0.0.0.0/0)."
+      });
     }
     const listings = await Listing.find().sort({ createdAt: -1 });
     res.json(listings);
@@ -153,7 +158,9 @@ app.get("/api/listings", async (req, res) => {
 app.post("/api/listings", async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({ error: "MongoDB is not connected on Render." });
+      return res.status(503).json({
+        error: "MongoDB is not connected on Render. Make sure MONGO_URI is set in Render Environment and 0.0.0.0/0 is enabled in MongoDB Network Access."
+      });
     }
     const newListing = await Listing.create(req.body);
     res.status(201).json(newListing);
@@ -185,6 +192,7 @@ app.delete("/api/listings/:id", async (req, res) => {
   }
 });
 
+// CONVERSATIONS
 app.get("/api/conversations", async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) return res.json([]);
@@ -239,7 +247,7 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
   }
 });
 
-// POST calculate shipping distance using Google Maps
+// MODULE 2: GOOGLE MAPS ROUTES API (SHIPPING CALCULATOR)
 app.post("/api/shipping-quote", async (req, res) => {
   try {
     const { origin, destination } = req.body;
@@ -248,23 +256,51 @@ app.post("/api/shipping-quote", async (req, res) => {
       return res.status(500).json({ error: "Google Maps API key missing in Render Environment." });
     }
 
-    const mapUrl = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(origin)}&destinations=${encodeURIComponent(destination)}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
+    const mapUrl = "https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix";
     
-    const response = await fetch(mapUrl);
+    const requestBody = {
+      origins: [
+        {
+          waypoint: { address: origin },
+          routeObjective: { routingPreference: "ROUTING_PREFERENCE_UNSPECIFIED" }
+        }
+      ],
+      destinations: [
+        {
+          waypoint: { address: destination }
+        }
+      ],
+      travelMode: "DRIVE"
+    };
+
+    const response = await fetch(mapUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": process.env.GOOGLE_MAPS_API_KEY,
+        "X-Goog-FieldMask": "originIndex,destinationIndex,duration,distanceMeters,status,condition"
+      },
+      body: JSON.stringify(requestBody)
+    });
+
     const data = await response.json();
 
-    if (data.status === "OK" && data.rows[0].elements[0].status === "OK") {
-      const distanceMeters = data.rows[0].elements[0].distance.value;
-      const distanceKm = Math.ceil(distanceMeters / 1000); // Round up to nearest km
+    if (data.error) {
+      return res.status(400).json({ error: data.error.message || "Google Maps API rejected the request." });
+    }
+
+    if (data[0] && data[0].distanceMeters != null) {
+      const distanceMeters = data[0].distanceMeters;
+      const distanceKm = Math.ceil(distanceMeters / 1000); 
       
-      // Module 2 Formula: $20 GYD per 1 km radius
+      // $20 GYD per 1 km
       const shippingCost = distanceKm * 20;
 
       res.json({
         success: true,
         distanceKm,
         shippingCost,
-        formattedDistance: data.rows[0].elements[0].distance.text
+        formattedDistance: `${distanceKm} km`
       });
     } else {
       res.status(400).json({ error: "Could not calculate driving distance between these locations." });
@@ -285,6 +321,8 @@ if (process.env.MONGO_URI) {
       await seedInitialData();
     })
     .catch((err) => console.error("❌ MongoDB connection error:", err.message));
+} else {
+  console.warn("⚠️ MONGO_URI environment variable is not set in Render!");
 }
 
 const PORT = process.env.PORT || 5000;
