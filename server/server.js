@@ -285,26 +285,33 @@ app.post("/api/shipping-quote", async (req, res) => {
 
     const data = await response.json();
 
+    // 1. Check for a top-level API authentication error
     if (data.error) {
-      return res.status(400).json({ error: data.error.message || "Google Maps API rejected the request." });
+      return res.status(400).json({ error: `Google API Error: ${data.error.message}` });
     }
 
-    if (data[0] && data[0].distanceMeters != null) {
-      const distanceMeters = data[0].distanceMeters;
-      const distanceKm = Math.ceil(distanceMeters / 1000); 
-      
-      // $20 GYD per 1 km
-      const shippingCost = distanceKm * 20;
+    // 2. Check the specific routing element returned by Google
+    if (data[0]) {
+      if (data[0].distanceMeters != null) {
+        const distanceMeters = data[0].distanceMeters;
+        const distanceKm = Math.ceil(distanceMeters / 1000); 
+        
+        // $20 GYD per 1 km
+        const shippingCost = distanceKm * 20;
 
-      res.json({
-        success: true,
-        distanceKm,
-        shippingCost,
-        formattedDistance: `${distanceKm} km`
-      });
-    } else {
-      res.status(400).json({ error: "Could not calculate driving distance between these locations." });
+        return res.json({
+          success: true,
+          distanceKm,
+          shippingCost,
+          formattedDistance: `${distanceKm} km`
+        });
+      } else if (data[0].status && data[0].status.message) {
+        // Google specifically explained why it couldn't map the route
+        return res.status(400).json({ error: `Google Maps: ${data[0].status.message}` });
+      }
     }
+    
+    res.status(400).json({ error: "Could not calculate driving distance. Try being more specific with the city/country." });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
