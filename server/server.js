@@ -2,11 +2,12 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 require("dotenv").config();
 
 const app = express();
 
-// Bulletproof CORS: Allows https://gogymarket.vercel.app, preview URLs, and localhost
 app.use(
   cors({
     origin: true,
@@ -16,9 +17,25 @@ app.use(
 
 app.use(express.json({ limit: "15mb" }));
 
+const JWT_SECRET = process.env.JWT_SECRET || "gogy_super_secret_dev_key_2026";
+
 // ==========================================
 // 1. MONGOOSE SCHEMAS & MODELS
 // ==========================================
+
+// NEW: User Auth Schema
+const userSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true },
+    email: { type: String, required: true, unique: true, lowercase: true },
+    password: { type: String, required: true },
+    location: { type: String, required: true, default: "Toronto, ON" }
+  },
+  { timestamps: true }
+);
+
+const User = mongoose.model("User", userSchema);
+
 const listingSchema = new mongoose.Schema(
   {
     sellerId: { type: String, required: true, index: true },
@@ -33,11 +50,8 @@ const listingSchema = new mongoose.Schema(
     },
     price: { type: Number, default: 0 },
     location: { type: String, required: true },
-    
-    // Module 2: Delivery Options
     deliveryMethods: { type: [String], default: ["pickup"] },
     deliveryFee: { type: Number, default: 0 },
-    
     description: { type: String, required: true },
     images: [{ type: String }],
     status: {
@@ -87,32 +101,11 @@ async function seedInitialData() {
           subcategory: "Tools",
           pricingType: "fixed",
           price: 165,
-          location: "Midtown Toronto, ON",
+          location: "2033 Yonge Street, Toronto, ON",
           deliveryMethods: ["pickup", "delivery"],
           deliveryFee: 15,
-          description:
-            "Includes both tools, two 20V batteries, charger, and hard carrying case. Works like new.",
-          images: [
-            "https://images.unsplash.com/photo-1504148455328-c376907d081c?w=600&auto=format&fit=crop&q=80"
-          ],
-          status: "active"
-        },
-        {
-          sellerId: "usr_2",
-          sellerName: "Marcus T.",
-          title: "Licensed Master Electrician - Panel Upgrades & Troubleshooting",
-          category: "Services",
-          subcategory: "Electricians",
-          pricingType: "hourly",
-          price: 90,
-          location: "Toronto, ON",
-          deliveryMethods: [],
-          deliveryFee: 0,
-          description:
-            "ESA certified residential & commercial electrical work, pot lights, and EV charger installation.",
-          images: [
-            "https://images.unsplash.com/photo-1621905251189-08b45d6a269e?w=600&auto=format&fit=crop&q=80"
-          ],
+          description: "Includes both tools, two 20V batteries, charger, and hard carrying case. Works like new.",
+          images: ["https://images.unsplash.com/photo-1504148455328-c376907d081c?w=600&auto=format&fit=crop&q=80"],
           status: "active"
         }
       ]);
@@ -127,27 +120,59 @@ async function seedInitialData() {
 // 3. API ROUTES
 // ==========================================
 
-app.get("/", (req, res) => {
-  res.send("GoGyMarket API is live. Visit /api/health for status.");
+// NEW: AUTH ROUTES
+app.post("/api/auth/register", async (req, res) => {
+  try {
+    const { name, email, password, location } = req.body;
+    
+    const existingUser = await User.findOne({ email });
+    if (existingUser) return res.status(400).json({ error: "Email is already registered." });
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    const newUser = await User.create({
+      name,
+      email,
+      password: hashedPassword,
+      location: location || "Toronto, ON"
+    });
+
+    const token = jwt.sign({ id: newUser._id }, JWT_SECRET, { expiresIn: "7d" });
+
+    res.status(201).json({
+      token,
+      user: { id: newUser._id, name: newUser.name, email: newUser.email, location: newUser.location }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.get("/api/health", (req, res) => {
-  res.json({
-    status: "ok",
-    service: "GoGyMarket API is running",
-    dbConnected: mongoose.connection.readyState === 1,
-    hasMongoUri: Boolean(process.env.MONGO_URI)
-  });
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    const user = await User.findOne({ email });
+    if (!user) return res.status(400).json({ error: "Invalid email or password." });
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.status(400).json({ error: "Invalid email or password." });
+
+    const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: "7d" });
+
+    res.json({
+      token,
+      user: { id: user._id, name: user.name, email: user.email, location: user.location }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // LISTINGS
 app.get("/api/listings", async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({
-        error: "Database is not connected yet. Check MONGO_URI and MongoDB Network Access (0.0.0.0/0)."
-      });
-    }
     const listings = await Listing.find().sort({ createdAt: -1 });
     res.json(listings);
   } catch (err) {
@@ -157,11 +182,6 @@ app.get("/api/listings", async (req, res) => {
 
 app.post("/api/listings", async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({
-        error: "MongoDB is not connected on Render. Make sure MONGO_URI is set in Render Environment and 0.0.0.0/0 is enabled in MongoDB Network Access."
-      });
-    }
     const newListing = await Listing.create(req.body);
     res.status(201).json(newListing);
   } catch (err) {
@@ -171,12 +191,7 @@ app.post("/api/listings", async (req, res) => {
 
 app.patch("/api/listings/:id/status", async (req, res) => {
   try {
-    const { status } = req.body;
-    const updated = await Listing.findByIdAndUpdate(
-      req.params.id,
-      { status },
-      { new: true }
-    );
+    const updated = await Listing.findByIdAndUpdate(req.params.id, { status: req.body.status }, { new: true });
     res.json(updated);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -195,7 +210,6 @@ app.delete("/api/listings/:id", async (req, res) => {
 // CONVERSATIONS
 app.get("/api/conversations", async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1) return res.json([]);
     const convs = await Conversation.find().sort({ updatedAt: -1 });
     res.json(convs);
   } catch (err) {
@@ -210,17 +224,12 @@ app.post("/api/conversations", async (req, res) => {
 
     if (!conv) {
       conv = await Conversation.create({
-        listingId,
-        listingTitle,
-        buyerName,
-        sellerName,
-        messages: [
-          {
-            sender: buyerName,
-            text: initialMessage || `Hi ${sellerName}, is "${listingTitle}" still available?`,
-            time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-          }
-        ]
+        listingId, listingTitle, buyerName, sellerName,
+        messages: [{
+          sender: buyerName,
+          text: initialMessage || `Hi ${sellerName}, is "${listingTitle}" still available?`,
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        }]
       });
     }
     res.status(201).json(conv);
@@ -236,8 +245,7 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
     if (!conv) return res.status(404).json({ error: "Conversation not found" });
 
     conv.messages.push({
-      sender,
-      text,
+      sender, text,
       time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     });
     await conv.save();
@@ -247,18 +255,13 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
   }
 });
 
-// MODULE 2: GOOGLE MAPS ROUTES API (SHIPPING CALCULATOR)
+// SHIPPING QUOTE
 app.post("/api/shipping-quote", async (req, res) => {
   try {
     const { origin, destination } = req.body;
-    
-    if (!process.env.GOOGLE_MAPS_API_KEY) {
-      return res.status(500).json({ error: "Google Maps API key missing in Render Environment." });
-    }
+    if (!process.env.GOOGLE_MAPS_API_KEY) return res.status(500).json({ error: "Google Maps API key missing." });
 
     const mapUrl = "https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix";
-    
-    // Simplified payload to prevent silent Google formatting warnings
     const requestBody = {
       origins: [{ waypoint: { address: origin } }],
       destinations: [{ waypoint: { address: destination } }],
@@ -277,35 +280,18 @@ app.post("/api/shipping-quote", async (req, res) => {
 
     const data = await response.json();
 
-    // 1. Check for a top-level API authentication error
-    if (data.error) {
-      return res.status(400).json({ error: `Google API Error: ${data.error.message}` });
-    }
-
-    // 2. Check the specific routing element returned by Google
+    if (data.error) return res.status(400).json({ error: `Google API Error: ${data.error.message}` });
     if (Array.isArray(data) && data.length > 0) {
       if (data[0].distanceMeters != null) {
-        const distanceMeters = data[0].distanceMeters;
-        const distanceKm = Math.ceil(distanceMeters / 1000); 
-        
-        // $20 GYD per 1 km
-        const shippingCost = distanceKm * 20;
-
-        return res.json({
-          success: true,
-          distanceKm,
-          shippingCost,
-          formattedDistance: `${distanceKm} km`
-        });
+        const distanceKm = Math.ceil(data[0].distanceMeters / 1000); 
+        return res.json({ success: true, distanceKm, shippingCost: distanceKm * 20, formattedDistance: `${distanceKm} km` });
       } else if (data[0].status && data[0].status.message) {
         return res.status(400).json({ error: `Google Maps: ${data[0].status.message}` });
       }
     }
-    
-    // 3. If it fails, print the EXACT raw response from Google to the screen
     res.status(400).json({ error: `Raw Google Response: ${JSON.stringify(data)}` });
   } catch (err) {
-    res.status(500).json({ error: `Backend crash: ${err.message}` });
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -316,35 +302,10 @@ if (process.env.MONGO_URI) {
   mongoose
     .connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 8000 })
     .then(async () => {
-      console.log("✅ Connected to MongoDB Atlas (gogymarket)");
-      
-      // 1. Run the initial seed if the database is totally empty
+      console.log("✅ Connected to MongoDB Atlas");
       await seedInitialData();
-
-      // 2. Force-update the vague sample addresses to specific street addresses 
-      // so Google Maps Routes API can successfully calculate distances.
-      try {
-        await Listing.updateMany(
-          { sellerName: "Sarah K." },
-          { $set: { location: "1800 Sheppard Ave E, Toronto, ON" } }
-        );
-        await Listing.updateMany(
-          { sellerName: "Marcus T." },
-          { $set: { location: "290 Bremner Blvd, Toronto, ON" } }
-        );
-        await Listing.updateMany(
-          { sellerName: "Errol D." },
-          { $set: { location: "2033 Yonge Street, Toronto, ON" } }
-        );
-        console.log("✅ Sample addresses updated to specific street addresses.");
-      } catch (updateErr) {
-        console.error("Failed to update sample addresses:", updateErr);
-      }
-
     })
     .catch((err) => console.error("❌ MongoDB connection error:", err.message));
-} else {
-  console.warn("⚠️ MONGO_URI environment variable is not set in Render!");
 }
 
 const PORT = process.env.PORT || 5000;
