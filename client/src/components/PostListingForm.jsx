@@ -20,9 +20,7 @@ export default function PostListingForm({
     price: "",
     location: currentUser.location || "Toronto, ON",
     description: "",
-    images: [],
-    deliveryMethods: ["pickup"], 
-    deliveryFee: ""
+    images: []
   });
 
   useEffect(() => {
@@ -57,14 +55,8 @@ export default function PostListingForm({
       ...prev,
       category: selectedCategory,
       subcategory: "",
-      pricingType: selectedCategory === "Services" ? "hourly" : "fixed",
-      deliveryMethods: selectedCategory === "Services" ? [] : ["pickup"]
+      pricingType: selectedCategory === "Services" ? "hourly" : "fixed"
     }));
-  };
-
-  // NEW: Sets exactly one delivery method instead of toggling multiple
-  const handleDeliveryChange = (method) => {
-    setFormData((prev) => ({ ...prev, deliveryMethods: [method] }));
   };
 
   const handleImageUpload = (e) => {
@@ -112,11 +104,6 @@ export default function PostListingForm({
       return;
     }
 
-    if (!isService && formData.deliveryMethods.length === 0) {
-      setError("Please select a Delivery Option.");
-      return;
-    }
-
     setIsSubmitting(true);
 
     const newListingPayload = {
@@ -131,8 +118,6 @@ export default function PostListingForm({
           ? 0
           : Number(formData.price),
       location: formData.location.trim(),
-      deliveryMethods: formData.deliveryMethods,
-      deliveryFee: formData.deliveryMethods.includes("delivery") ? Number(formData.deliveryFee || 0) : 0,
       description: formData.description.trim(),
       images:
         formData.images.length > 0
@@ -267,7 +252,7 @@ export default function PostListingForm({
               placeholder={
                 isService
                   ? "Describe your experience, service area, minimum call-out fee, and availability..."
-                  : "Include condition, storage size, accessories included, and pickup area..."
+                  : "Include condition, storage size, accessories included..."
               }
               value={formData.description}
               onChange={(e) =>
@@ -281,7 +266,7 @@ export default function PostListingForm({
         {/* STEP 3: DYNAMIC PRICING & LOCATION */}
         <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-5">
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-            Step 3: Pricing & Location
+            Step 3: Pricing & Origin Location
           </h3>
 
           <div className="flex flex-wrap gap-2">
@@ -318,9 +303,7 @@ export default function PostListingForm({
                     : "Price ($ GYD) *"}
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-2.5 text-slate-400 font-semibold">
-                    $
-                  </span>
+                  <span className="absolute left-3 top-2.5 text-slate-400 font-semibold">$</span>
                   <input
                     type="number"
                     min="0"
@@ -333,9 +316,7 @@ export default function PostListingForm({
                     className="w-full rounded-lg border border-slate-300 pl-7 pr-12 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
                   />
                   {formData.pricingType === "hourly" && (
-                    <span className="absolute right-3 top-2.5 text-xs text-slate-500 font-medium">
-                      / hr
-                    </span>
+                    <span className="absolute right-3 top-2.5 text-xs text-slate-500 font-medium">/ hr</span>
                   )}
                 </div>
               </div>
@@ -343,85 +324,28 @@ export default function PostListingForm({
 
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1">
-                Location / Neighbourhood *
+                Item Location (Origin Address) *
               </label>
               <input
                 type="text"
+                placeholder="e.g. 2033 Yonge Street, Toronto"
                 value={formData.location}
                 onChange={(e) =>
                   setFormData((prev) => ({ ...prev, location: e.target.value }))
                 }
                 className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
               />
+              <p className="text-[10px] text-slate-500 mt-1">
+                Used by Google Maps to calculate delivery fees for buyers.
+              </p>
             </div>
           </div>
         </div>
 
-        {/* STEP 4: DELIVERY OPTIONS (RADIO BUTTONS) */}
-        {!isService && (
-          <div className="space-y-4 px-2">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Step 4: Delivery Options
-            </h3>
-            
-            <div className="flex flex-col gap-3">
-              <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
-                <input
-                  type="radio"
-                  name="deliveryMethod"
-                  checked={formData.deliveryMethods.includes("pickup")}
-                  onChange={() => handleDeliveryChange("pickup")}
-                  className="w-5 h-5 text-emerald-600 border-slate-300 focus:ring-emerald-500"
-                />
-                <span className="font-semibold text-slate-800 text-sm">Local Pickup (Free)</span>
-              </label>
-
-              <div className={`p-3 rounded-lg border transition-colors ${formData.deliveryMethods.includes("delivery") ? "border-emerald-300 bg-emerald-50/50" : "border-slate-200 hover:bg-slate-50"}`}>
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="deliveryMethod"
-                    checked={formData.deliveryMethods.includes("delivery")}
-                    onChange={() => handleDeliveryChange("delivery")}
-                    className="w-5 h-5 text-emerald-600 border-slate-300 focus:ring-emerald-500"
-                  />
-                  <span className="font-semibold text-slate-800 text-sm">I can deliver to the buyer</span>
-                </label>
-                
-                {formData.deliveryMethods.includes("delivery") && (
-                  <div className="mt-3 pl-8 flex items-center gap-2">
-                    <span className="text-sm font-medium text-slate-600">Delivery Fee: $</span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      placeholder="e.g. 500"
-                      value={formData.deliveryFee}
-                      onChange={(e) => setFormData(prev => ({...prev, deliveryFee: e.target.value}))}
-                      className="w-24 rounded border border-slate-300 px-2 py-1 text-sm focus:border-emerald-500 focus:outline-none"
-                    />
-                  </div>
-                )}
-              </div>
-
-              <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
-                <input
-                  type="radio"
-                  name="deliveryMethod"
-                  checked={formData.deliveryMethods.includes("shipping")}
-                  onChange={() => handleDeliveryChange("shipping")}
-                  className="w-5 h-5 text-emerald-600 border-slate-300 focus:ring-emerald-500"
-                />
-                <span className="font-semibold text-slate-800 text-sm">Shipping Available (Buyer pays delivery fee based on proximity)</span>
-              </label>
-            </div>
-          </div>
-        )}
-
-        {/* STEP 5: PHOTO PREVIEWS */}
+        {/* STEP 4: PHOTO PREVIEWS */}
         <div className="bg-slate-50 p-5 rounded-xl border border-slate-200">
           <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">
-            {isService ? "Step 4: Photos (Optional)" : "Step 5: Photos (Optional - Up to 4)"}
+            Step 4: Photos (Optional - Up to 4)
           </label>
           <div className="flex flex-wrap gap-3 items-center">
             <label className="w-24 h-24 rounded-lg border-2 border-dashed border-slate-300 hover:border-emerald-500 flex flex-col items-center justify-center cursor-pointer bg-white text-slate-500 hover:text-emerald-600 transition-colors">
