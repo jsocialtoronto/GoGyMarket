@@ -9,19 +9,18 @@ export default function PortalLayout({
   children
 }) {
   const navItems = [
-    { id: "search", label: "1. Search", icon: "🔍", badge: null },
-    { id: "messages", label: "2. Messages", icon: "💬", badge: counts.unreadMessages },
-    { id: "post", label: "3. Post Ad", icon: "➕", badge: null },
-    { id: "listings", label: "4. Listing", icon: "📦", badge: counts.myListings },
-    { id: "favourites", label: "5. Favourites", icon: "❤️", badge: counts.favourites }
+    { id: "search", label: "Search", icon: "🔍", badge: null },
+    { id: "messages", label: "Messages", icon: "💬", badge: counts.unreadMessages },
+    { id: "post", label: "Post Ad", icon: "➕", badge: null },
+    { id: "listings", label: "My Listings", icon: "📦", badge: counts.myListings },
+    { id: "favourites", label: "Saved", icon: "❤️", badge: counts.favourites },
+    { id: "cart", label: "Cart", icon: "🛒", badge: counts.cart }
   ];
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
-      {/* Top Portal Header */}
       <header className="bg-black text-white sticky top-0 z-30 shadow-md">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-          {/* Brand Logo */}
           <div
             onClick={() => setActiveTab("search")}
             className="flex items-center gap-2 cursor-pointer"
@@ -35,7 +34,6 @@ export default function PortalLayout({
             </div>
           </div>
 
-          {/* Signed-in User Pill */}
           <div className="flex items-center gap-3 bg-slate-900 px-3 py-1.5 rounded-full border border-slate-800">
             <div className="w-7 h-7 rounded-full bg-emerald-500 text-slate-950 font-bold flex items-center justify-center text-sm">
               {currentUser.name.charAt(0)}
@@ -49,9 +47,8 @@ export default function PortalLayout({
           </div>
         </div>
 
-        {/* 5-Tab Portal Navigation Bar (Black background, Green active tab) */}
         <nav className="bg-black border-t border-slate-800 pt-1">
-          <div className="max-w-6xl mx-auto px-2 sm:px-4 flex items-center justify-between sm:justify-start sm:gap-2 overflow-x-auto">
+          <div className="max-w-6xl mx-auto px-2 sm:px-4 flex items-center justify-between sm:justify-start sm:gap-1 overflow-x-auto">
             {navItems.map((tab) => {
               const isActive = activeTab === tab.id;
               return (
@@ -84,7 +81,6 @@ export default function PortalLayout({
         </nav>
       </header>
 
-      {/* Main Portal Content Area */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-6">
         {children}
       </main>
