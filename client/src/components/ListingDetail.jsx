@@ -42,7 +42,7 @@ export default function ListingDetail({
 
   const handleCalculateShipping = async () => {
     if (!buyerAddress.trim()) {
-      setCalcError("Please enter a delivery address.");
+      setCalcError("Please enter your full delivery address.");
       return;
     }
     
@@ -54,8 +54,9 @@ export default function ListingDetail({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          origin: listing.location,
-          destination: buyerAddress.trim()
+          // Adding country context helps Google Maps route partial addresses
+          origin: `${listing.location}, Canada`,
+          destination: `${buyerAddress.trim()}, Canada`
         })
       });
       const data = await res.json();
@@ -71,14 +72,13 @@ export default function ListingDetail({
     }
   };
 
-  // Build the message to send to the seller based on their choices
   const handleProceed = () => {
     let intentMessage = `Hi ${listing.sellerName}, I would like to buy "${listing.title}".\n\n`;
     
     if (isService) {
       intentMessage += `I am interested in booking this service.`;
     } else if (deliveryMethod === "pickup") {
-      intentMessage += `I would like to do Local Pickup.`;
+      intentMessage += `I would like to arrange Local Pickup in ${listing.location}.`;
     } else {
       intentMessage += `I need this delivered to: ${buyerAddress}.\n`;
       if (shippingCost !== null) {
@@ -89,7 +89,6 @@ export default function ListingDetail({
     onMessageSeller({ ...listing, initialMessage: intentMessage });
   };
 
-  // Total Calculation
   const itemPrice = Number(listing.price || 0);
   const totalCost = deliveryMethod === "delivery" && shippingCost !== null
     ? itemPrice + shippingCost
@@ -112,7 +111,7 @@ export default function ListingDetail({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 lg:divide-x divide-slate-200">
-        {/* LEFT COLUMN: Gallery */}
+        {/* LEFT COLUMN: Gallery & Description */}
         <div className="p-6 bg-slate-50/50 flex flex-col gap-4">
           <div className="w-full aspect-square bg-slate-100 rounded-xl overflow-hidden border border-slate-200 relative group">
             <img
@@ -153,9 +152,10 @@ export default function ListingDetail({
               <h1 className="text-xl font-bold text-slate-900 mt-2 leading-tight">
                 {listing.title}
               </h1>
-              <p className="text-sm text-slate-500 mt-2">
-                📍 Origin: {listing.location}
-              </p>
+              {/* Highlighted Seller Location */}
+              <div className="mt-3 inline-flex items-center gap-2 bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-bold border border-slate-200">
+                <span>📍</span> <span>Item Location: {listing.location}</span>
+              </div>
             </div>
             <button onClick={() => onToggleFavourite(listing._id)} className="flex-shrink-0 w-12 h-12 rounded-full border border-slate-200 flex items-center justify-center bg-slate-50 hover:bg-slate-100">
               <span className="text-xl">{isFavourite ? "❤️" : "🤍"}</span>
@@ -176,7 +176,7 @@ export default function ListingDetail({
                     className="w-5 h-5 text-emerald-600 focus:ring-emerald-500" 
                   />
                   <div>
-                    <p className="font-bold text-slate-900 text-sm">Local Pickup</p>
+                    <p className="font-bold text-slate-900 text-sm">Local Pickup in {listing.location}</p>
                     <p className="text-xs text-slate-500 font-medium">Free • You travel to the seller</p>
                   </div>
                 </label>
@@ -191,15 +191,14 @@ export default function ListingDetail({
                   />
                   <div className="flex-1">
                     <p className="font-bold text-slate-900 text-sm">Delivery ($20 GYD / km)</p>
-                    <p className="text-xs text-slate-500 font-medium">Seller delivers to your address</p>
+                    <p className="text-xs text-slate-500 font-medium">Delivered to your address</p>
                   </div>
                 </label>
               </div>
 
-              {/* Delivery Calculator UI */}
               {deliveryMethod === "delivery" && (
                 <div className="mt-4 pt-4 border-t border-slate-200 space-y-3">
-                  <label className="block text-xs font-bold text-slate-700">Enter Delivery Address</label>
+                  <label className="block text-xs font-bold text-slate-700">Enter your full street address & city:</label>
                   <div className="flex gap-2">
                     <input 
                       type="text" 
@@ -207,7 +206,7 @@ export default function ListingDetail({
                       value={buyerAddress}
                       onChange={(e) => {
                         setBuyerAddress(e.target.value);
-                        setShippingCost(null); // Reset math if they change address
+                        setShippingCost(null);
                       }}
                       className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
                     />
@@ -239,7 +238,6 @@ export default function ListingDetail({
             </div>
           )}
 
-          {/* Subtotal & Action Block */}
           <div className="mt-auto bg-slate-50 border border-slate-200 p-5 rounded-xl">
             {!isOwner && listing.status === "active" && (
               <div className="flex justify-between items-center mb-4">
