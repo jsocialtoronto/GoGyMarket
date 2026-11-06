@@ -34,16 +34,27 @@ export default function PortalLayout({
             </div>
           </div>
 
+          {/* Signed-in User Pill with Logout */}
           <div className="flex items-center gap-3 bg-slate-900 px-3 py-1.5 rounded-full border border-slate-800">
             <div className="w-7 h-7 rounded-full bg-emerald-500 text-slate-950 font-bold flex items-center justify-center text-sm">
               {currentUser.name.charAt(0)}
             </div>
-            <div className="hidden sm:block text-left">
+            <div className="hidden sm:block text-left mr-2">
               <p className="text-xs font-semibold leading-none">{currentUser.name}</p>
-              <p className="text-[11px] text-emerald-400 leading-tight">
-                {currentUser.location} • Buyer & Seller
+              <p className="text-[11px] text-emerald-400 leading-tight truncate max-w-[100px]">
+                {currentUser.location}
               </p>
             </div>
+            <button 
+              onClick={() => {
+                localStorage.removeItem("gogy_user");
+                localStorage.removeItem("gogy_token");
+                window.location.reload();
+              }}
+              className="text-[10px] font-bold bg-slate-800 hover:bg-red-600 text-white px-2 py-1 rounded transition-colors"
+            >
+              LOGOUT
+            </button>
           </div>
         </div>
 
