@@ -258,18 +258,10 @@ app.post("/api/shipping-quote", async (req, res) => {
 
     const mapUrl = "https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix";
     
+    // Simplified payload to prevent silent Google formatting warnings
     const requestBody = {
-      origins: [
-        {
-          waypoint: { address: origin },
-          routeObjective: { routingPreference: "ROUTING_PREFERENCE_UNSPECIFIED" }
-        }
-      ],
-      destinations: [
-        {
-          waypoint: { address: destination }
-        }
-      ],
+      origins: [{ waypoint: { address: origin } }],
+      destinations: [{ waypoint: { address: destination } }],
       travelMode: "DRIVE"
     };
 
@@ -291,7 +283,7 @@ app.post("/api/shipping-quote", async (req, res) => {
     }
 
     // 2. Check the specific routing element returned by Google
-    if (data[0]) {
+    if (Array.isArray(data) && data.length > 0) {
       if (data[0].distanceMeters != null) {
         const distanceMeters = data[0].distanceMeters;
         const distanceKm = Math.ceil(distanceMeters / 1000); 
@@ -306,14 +298,14 @@ app.post("/api/shipping-quote", async (req, res) => {
           formattedDistance: `${distanceKm} km`
         });
       } else if (data[0].status && data[0].status.message) {
-        // Google specifically explained why it couldn't map the route
         return res.status(400).json({ error: `Google Maps: ${data[0].status.message}` });
       }
     }
     
-    res.status(400).json({ error: "Could not calculate driving distance. Try being more specific with the city/country." });
+    // 3. If it fails, print the EXACT raw response from Google to the screen
+    res.status(400).json({ error: `Raw Google Response: ${JSON.stringify(data)}` });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: `Backend crash: ${err.message}` });
   }
 });
 
