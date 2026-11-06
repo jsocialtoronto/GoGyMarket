@@ -23,11 +23,12 @@ const JWT_SECRET = process.env.JWT_SECRET || "gogy_super_secret_dev_key_2026";
 // 1. MONGOOSE SCHEMAS & MODELS
 // ==========================================
 
-// NEW: User Auth Schema
 const userSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true },
-    email: { type: String, required: true, unique: true, lowercase: true },
+    accountType: { type: String, enum: ["personal", "business"], default: "personal" },
+    name: { type: String, required: true }, 
+    email: { type: String, lowercase: true }, 
+    phone: { type: String },
     password: { type: String, required: true },
     location: { type: String, required: true, default: "Toronto, ON" }
   },
@@ -120,20 +121,34 @@ async function seedInitialData() {
 // 3. API ROUTES
 // ==========================================
 
-// NEW: AUTH ROUTES
+// AUTH ROUTES
 app.post("/api/auth/register", async (req, res) => {
   try {
-    const { name, email, password, location } = req.body;
+    const { accountType, firstName, lastName, businessName, contactMethod, password, location } = req.body;
     
-    const existingUser = await User.findOne({ email });
-    if (existingUser) return res.status(400).json({ error: "Email is already registered." });
+    const isEmail = contactMethod.includes("@");
+    const email = isEmail ? contactMethod.toLowerCase() : undefined;
+    const phone = !isEmail ? contactMethod : undefined;
+
+    if (email) {
+      const existingUser = await User.findOne({ email });
+      if (existingUser) return res.status(400).json({ error: "This email is already registered." });
+    }
+    if (phone) {
+      const existingUser = await User.findOne({ phone });
+      if (existingUser) return res.status(400).json({ error: "This phone number is already registered." });
+    }
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
+    const displayName = accountType === "business" ? businessName : `${firstName} ${lastName}`;
+
     const newUser = await User.create({
-      name,
+      accountType,
+      name: displayName,
       email,
+      phone,
       password: hashedPassword,
       location: location || "Toronto, ON"
     });
@@ -142,7 +157,7 @@ app.post("/api/auth/register", async (req, res) => {
 
     res.status(201).json({
       token,
-      user: { id: newUser._id, name: newUser.name, email: newUser.email, location: newUser.location }
+      user: { id: newUser._id, name: newUser.name, email: newUser.email, phone: newUser.phone, location: newUser.location }
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -151,19 +166,22 @@ app.post("/api/auth/register", async (req, res) => {
 
 app.post("/api/auth/login", async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { contactMethod, password } = req.body;
+    const isEmail = contactMethod.includes("@");
 
-    const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ error: "Invalid email or password." });
+    const query = isEmail ? { email: contactMethod.toLowerCase() } : { phone: contactMethod };
+    const user = await User.findOne(query);
+    
+    if (!user) return res.status(400).json({ error: "Invalid login credentials." });
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ error: "Invalid email or password." });
+    if (!isMatch) return res.status(400).json({ error: "Invalid login credentials." });
 
     const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: "7d" });
 
     res.json({
       token,
-      user: { id: user._id, name: user.name, email: user.email, location: user.location }
+      user: { id: user._id, name: user.name, email: user.email, phone: user.phone, location: user.location }
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -281,6 +299,7 @@ app.post("/api/shipping-quote", async (req, res) => {
     const data = await response.json();
 
     if (data.error) return res.status(400).json({ error: `Google API Error: ${data.error.message}` });
+    
     if (Array.isArray(data) && data.length > 0) {
       if (data[0].distanceMeters != null) {
         const distanceKm = Math.ceil(data[0].distanceMeters / 1000); 
@@ -303,7 +322,26 @@ if (process.env.MONGO_URI) {
     .connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 8000 })
     .then(async () => {
       console.log("✅ Connected to MongoDB Atlas");
+      
       await seedInitialData();
+
+      try {
+        await Listing.updateMany(
+          { sellerName: "Sarah K." },
+          { $set: { location: "1800 Sheppard Ave E, Toronto, ON" } }
+        );
+        await Listing.updateMany(
+          { sellerName: "Marcus T." },
+          { $set: { location: "290 Bremner Blvd, Toronto, ON" } }
+        );
+        await Listing.updateMany(
+          { sellerName: "Errol D." },
+          { $set: { location: "2033 Yonge Street, Toronto, ON" } }
+        );
+      } catch (updateErr) {
+        console.error("Failed to update sample addresses:", updateErr);
+      }
+
     })
     .catch((err) => console.error("❌ MongoDB connection error:", err.message));
 }
