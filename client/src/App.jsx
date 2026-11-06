@@ -3,12 +3,17 @@ import React, { useState, useEffect, useMemo } from "react";
 import PortalLayout from "./components/PortalLayout";
 import PostListingForm from "./components/PostListingForm";
 import ListingDetail from "./components/ListingDetail";
+import AuthScreen from "./components/AuthScreen";
 import { MARKETPLACE_CATEGORIES, LISTING_STATUSES } from "./config/categoriesConfig";
 
 const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:5000").replace(/\/$/, "");
 
 export default function App() {
-  const currentUser = { id: "usr_1", name: "Errol D.", location: "Midtown Toronto, ON" };
+  // Real Authentication State
+  const [currentUser, setCurrentUser] = useState(() => {
+    const saved = localStorage.getItem("gogy_user");
+    return saved ? JSON.parse(saved) : null;
+  });
 
   const [activeTab, setActiveTab] = useState("search");
   const [selectedListing, setSelectedListing] = useState(null);
@@ -20,7 +25,6 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // NEW: Global Shopping Cart State
   const [cart, setCart] = useState(() => {
     const saved = localStorage.getItem("gogy_cart");
     return saved ? JSON.parse(saved) : [];
@@ -58,8 +62,11 @@ export default function App() {
         setIsLoading(false);
       }
     }
-    loadMarketplaceData();
-  }, []);
+    // Only load data if user is logged in
+    if (currentUser) {
+      loadMarketplaceData();
+    }
+  }, [currentUser]);
 
   useEffect(() => {
     localStorage.setItem("gogy_favs", JSON.stringify(favouriteIds));
@@ -72,6 +79,19 @@ export default function App() {
   useEffect(() => {
     setSelectedListing(null);
   }, [activeTab]);
+
+  // If no user is logged in, show the AuthScreen
+  if (!currentUser) {
+    return (
+      <AuthScreen 
+        onAuthSuccess={(user, token) => {
+          localStorage.setItem("gogy_user", JSON.stringify(user));
+          localStorage.setItem("gogy_token", token);
+          setCurrentUser(user);
+        }} 
+      />
+    );
+  }
 
   const formatPrice = (item) => {
     if (item.pricingType === "free") return "FREE";
@@ -94,7 +114,6 @@ export default function App() {
     );
   };
 
-  // AMAZON STYLE: Add to Cart functionality
   const handleAddToCart = (cartItem) => {
     setCart((prev) => [...prev, cartItem]);
     setSelectedListing(null);
@@ -105,10 +124,8 @@ export default function App() {
     setCart((prev) => prev.filter(item => item.cartItemId !== cartItemId));
   };
 
-  // AMAZON STYLE: Mock Checkout function
   const handlePlaceOrder = async () => {
     try {
-      // For MVP, we loop through the cart and PATCH the status to 'pending' in MongoDB
       for (const item of cart) {
         await fetch(`${API_BASE}/api/listings/${item._id}/status`, {
           method: "PATCH",
@@ -117,7 +134,6 @@ export default function App() {
         });
       }
       
-      // Update local state to hide them from Search
       setListings(prev => prev.map(listing => 
         cart.some(c => c._id === listing._id) ? { ...listing, status: "pending" } : listing
       ));
@@ -174,7 +190,7 @@ export default function App() {
           listingTitle: item.title,
           buyerName: currentUser.name,
           sellerName: item.sellerName,
-          initialMessage: item.initialMessage // Accepts the custom drafted message
+          initialMessage: item.initialMessage
         })
       });
       if (res.ok) {
@@ -226,7 +242,6 @@ export default function App() {
   const favouriteListings = listings.filter((item) => favouriteIds.includes(item._id));
   const activeConversation = conversations.find((c) => c._id === activeConvId);
 
-  // Cart Math
   const cartItemTotal = cart.reduce((sum, item) => sum + Number(item.price || 0), 0);
   const cartDeliveryTotal = cart.reduce((sum, item) => sum + Number(item.shippingCost || 0), 0);
   const cartGrandTotal = cartItemTotal + cartDeliveryTotal;
@@ -337,7 +352,6 @@ export default function App() {
             </div>
           )}
 
-          {/* 6. NEW: SHOPPING CART CHECKOUT VIEW */}
           {activeTab === "cart" && (
             <div className="max-w-4xl mx-auto space-y-6">
               <h2 className="text-2xl font-bold text-slate-900">Your Shopping Cart</h2>
@@ -350,7 +364,6 @@ export default function App() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  {/* Cart Items List */}
                   <div className="lg:col-span-2 space-y-4">
                     {cart.map(item => (
                       <div key={item.cartItemId} className="bg-white p-4 rounded-xl border border-slate-200 flex gap-4">
@@ -370,7 +383,6 @@ export default function App() {
                     ))}
                   </div>
                   
-                  {/* Order Summary Sidebar */}
                   <div className="bg-white p-6 rounded-xl border border-slate-200 h-fit space-y-4 sticky top-24 shadow-sm">
                      <h3 className="font-bold text-lg text-slate-900 border-b border-slate-200 pb-3">Order Summary</h3>
                      
