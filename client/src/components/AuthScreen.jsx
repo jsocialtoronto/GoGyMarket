@@ -14,7 +14,11 @@ export default function AuthScreen({ onAuthSuccess }) {
   const [contactMethod, setContactMethod] = useState(""); // Email or Phone
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [location, setLocation] = useState("");
+  
+  // NEW: Address and City state
+  const [address, setAddress] = useState("");
+  const [city, setCity] = useState("");
+  
   const [isNotRobot, setIsNotRobot] = useState(false);
 
   const [error, setError] = useState("");
@@ -27,7 +31,8 @@ export default function AuthScreen({ onAuthSuccess }) {
       if (!businessName.trim()) return "Business Name is required.";
     }
 
-    if (!location.trim()) return "Default location is required.";
+    // Ensure both Address and City are provided
+    if (!address.trim() || !city.trim()) return "Both Address and City/Town are required.";
 
     // Contact Validation (Email or Phone)
     const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactMethod);
@@ -62,9 +67,19 @@ export default function AuthScreen({ onAuthSuccess }) {
     setIsLoading(true);
 
     const endpoint = isLogin ? "/api/auth/login" : "/api/auth/register";
+    
+    // Combine Address and City for the backend
     const payload = isLogin 
       ? { contactMethod, password }
-      : { accountType, firstName, lastName, businessName, contactMethod, password, location };
+      : { 
+          accountType, 
+          firstName, 
+          lastName, 
+          businessName, 
+          contactMethod, 
+          password, 
+          location: `${address.trim()}, ${city.trim()}` 
+        };
     
     try {
       const res = await fetch(`${API_BASE}${endpoint}`, {
@@ -147,10 +162,17 @@ export default function AuthScreen({ onAuthSuccess }) {
             </div>
           )}
 
+          {/* NEW: Address and City split into two fields */}
           {!isLogin && (
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Default Location *</label>
-              <input type="text" placeholder="e.g. Toronto, ON" value={location} onChange={(e) => setLocation(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 focus:border-emerald-500 focus:outline-none" />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Address *</label>
+                <input type="text" placeholder="e.g. 15 Eastdale Ave" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 focus:border-emerald-500 focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">City / Town *</label>
+                <input type="text" placeholder="e.g. Toronto" value={city} onChange={(e) => setCity(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 focus:border-emerald-500 focus:outline-none" />
+              </div>
             </div>
           )}
 
