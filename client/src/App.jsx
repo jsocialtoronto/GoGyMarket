@@ -9,7 +9,6 @@ import { MARKETPLACE_CATEGORIES, LISTING_STATUSES } from "./config/categoriesCon
 const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:5000").replace(/\/$/, "");
 
 export default function App() {
-  // Real Authentication State
   const [currentUser, setCurrentUser] = useState(() => {
     const saved = localStorage.getItem("gogy_user");
     return saved ? JSON.parse(saved) : null;
@@ -62,7 +61,7 @@ export default function App() {
         setIsLoading(false);
       }
     }
-    // Only load data if user is logged in
+    
     if (currentUser) {
       loadMarketplaceData();
     }
@@ -79,19 +78,6 @@ export default function App() {
   useEffect(() => {
     setSelectedListing(null);
   }, [activeTab]);
-
-  // If no user is logged in, show the AuthScreen
-  if (!currentUser) {
-    return (
-      <AuthScreen 
-        onAuthSuccess={(user, token) => {
-          localStorage.setItem("gogy_user", JSON.stringify(user));
-          localStorage.setItem("gogy_token", token);
-          setCurrentUser(user);
-        }} 
-      />
-    );
-  }
 
   const formatPrice = (item) => {
     if (item.pricingType === "free") return "FREE";
@@ -228,6 +214,7 @@ export default function App() {
     }
   };
 
+  // ALL HOOKS ARE NOW SAFELY ABOVE THE EARLY RETURN
   const filteredListings = useMemo(() => {
     return listings.filter((item) => {
       if (item.status === "sold") return false;
@@ -238,13 +225,27 @@ export default function App() {
     });
   }, [listings, searchQuery, selectedCat, selectedSubcat]);
 
-  const myListings = listings.filter((item) => item.sellerId === currentUser.id);
+  // Added safe optional chaining (?.) so this doesn't crash before the user is logged in
+  const myListings = listings.filter((item) => item.sellerId === currentUser?.id);
   const favouriteListings = listings.filter((item) => favouriteIds.includes(item._id));
   const activeConversation = conversations.find((c) => c._id === activeConvId);
 
   const cartItemTotal = cart.reduce((sum, item) => sum + Number(item.price || 0), 0);
   const cartDeliveryTotal = cart.reduce((sum, item) => sum + Number(item.shippingCost || 0), 0);
   const cartGrandTotal = cartItemTotal + cartDeliveryTotal;
+
+  // NEW FIX: The AuthScreen is now rendered cleanly without violating Hook rules
+  if (!currentUser) {
+    return (
+      <AuthScreen 
+        onAuthSuccess={(user, token) => {
+          localStorage.setItem("gogy_user", JSON.stringify(user));
+          localStorage.setItem("gogy_token", token);
+          setCurrentUser(user);
+        }} 
+      />
+    );
+  }
 
   return (
     <PortalLayout
@@ -463,15 +464,21 @@ export default function App() {
                 <button onClick={() => setActiveTab("post")} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2.5 rounded-lg shadow-sm">+ Post Another Listing</button>
               </div>
               <div className="space-y-3">
-                {myListings.map((item) => (
-                  <div key={item._id} onClick={() => setSelectedListing(item)} className="bg-white p-4 rounded-xl border flex gap-4 cursor-pointer hover:border-emerald-300">
-                    <img src={item.images?.[0]} className="w-20 h-20 rounded-lg object-cover" />
-                    <div>
-                      <h3 className="font-bold text-slate-900">{item.title}</h3>
-                      <p className="text-sm font-extrabold text-emerald-700">{formatPrice(item)}</p>
+                {myListings.length === 0 ? (
+                   <div className="bg-white p-8 rounded-xl border border-slate-200 text-center text-slate-500 text-sm">
+                     You haven't posted any listings yet.
+                   </div>
+                ) : (
+                  myListings.map((item) => (
+                    <div key={item._id} onClick={() => setSelectedListing(item)} className="bg-white p-4 rounded-xl border flex gap-4 cursor-pointer hover:border-emerald-300">
+                      <img src={item.images?.[0]} className="w-20 h-20 rounded-lg object-cover" />
+                      <div>
+                        <h3 className="font-bold text-slate-900">{item.title}</h3>
+                        <p className="text-sm font-extrabold text-emerald-700">{formatPrice(item)}</p>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
           )}
@@ -480,15 +487,21 @@ export default function App() {
             <div className="space-y-4">
               <h2 className="text-xl font-bold">Saved Favourites</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {favouriteListings.map((item) => (
-                  <div key={item._id} onClick={() => setSelectedListing(item)} className="bg-white rounded-xl border p-4 flex gap-4 items-center cursor-pointer">
-                    <img src={item.images?.[0]} className="w-16 h-16 rounded-lg object-cover" />
-                    <div>
-                      <p className="text-emerald-700 font-bold text-sm">{formatPrice(item)}</p>
-                      <h3 className="font-semibold text-sm line-clamp-1">{item.title}</h3>
+                {favouriteListings.length === 0 ? (
+                   <div className="bg-white p-8 rounded-xl border border-slate-200 text-center text-slate-500 text-sm col-span-full">
+                     You haven't saved any listings yet.
+                   </div>
+                ) : (
+                  favouriteListings.map((item) => (
+                    <div key={item._id} onClick={() => setSelectedListing(item)} className="bg-white rounded-xl border p-4 flex gap-4 items-center cursor-pointer hover:border-emerald-300">
+                      <img src={item.images?.[0]} className="w-16 h-16 rounded-lg object-cover" />
+                      <div>
+                        <p className="text-emerald-700 font-bold text-sm">{formatPrice(item)}</p>
+                        <h3 className="font-semibold text-sm line-clamp-1">{item.title}</h3>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
           )}
