@@ -4,6 +4,7 @@ import PortalLayout from "./components/PortalLayout";
 import PostListingForm from "./components/PostListingForm";
 import ListingDetail from "./components/ListingDetail";
 import AuthScreen from "./components/AuthScreen";
+import AdminDashboard from "./components/AdminDashboard";
 import { MARKETPLACE_CATEGORIES, LISTING_STATUSES } from "./config/categoriesConfig";
 
 const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:5000").replace(/\/$/, "");
@@ -29,15 +30,13 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Checkout & Payment States (Options 1, 2, 3, 4)
-  const [deliveryPaymentMethod, setDeliveryPaymentMethod] = useState("cash"); // "cash" | "etransfer" | "credit"
+  const [deliveryPaymentMethod, setDeliveryPaymentMethod] = useState("cash");
   const [cashVerifyStep, setCashVerifyStep] = useState(false);
   const [lockboxPhoto, setLockboxPhoto] = useState(null);
   const [checkoutError, setCheckoutError] = useState("");
   const [isProcessingOrder, setIsProcessingOrder] = useState(false);
   const [completedOrder, setCompletedOrder] = useState(null);
 
-  // Seller stock deduction input state per listingId
   const [sellQuantities, setSellQuantities] = useState({});
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -48,31 +47,31 @@ export default function App() {
   const [activeConvId, setActiveConvId] = useState(null);
   const [replyText, setReplyText] = useState("");
 
-  useEffect(() => {
-    async function loadMarketplaceData() {
-      try {
-        setIsLoading(true);
-        const [listingsRes, convsRes] = await Promise.all([
-          fetch(`${API_BASE}/api/listings`),
-          fetch(`${API_BASE}/api/conversations`)
-        ]);
+  const loadMarketplaceData = async () => {
+    try {
+      setIsLoading(true);
+      const [listingsRes, convsRes] = await Promise.all([
+        fetch(`${API_BASE}/api/listings`),
+        fetch(`${API_BASE}/api/conversations`)
+      ]);
 
-        if (listingsRes.ok) {
-          const listingsData = await listingsRes.json();
-          setListings(listingsData);
-        }
-        if (convsRes.ok) {
-          const convsData = await convsRes.json();
-          setConversations(convsData);
-          if (convsData.length > 0) setActiveConvId(convsData[0]._id);
-        }
-      } catch (err) {
-        console.error("Error loading data from Render:", err);
-      } finally {
-        setIsLoading(false);
+      if (listingsRes.ok) {
+        const listingsData = await listingsRes.json();
+        setListings(listingsData);
       }
+      if (convsRes.ok) {
+        const convsData = await convsRes.json();
+        setConversations(convsData);
+        if (convsData.length > 0 && !activeConvId) setActiveConvId(convsData[0]._id);
+      }
+    } catch (err) {
+      console.error("Error loading data from Render:", err);
+    } finally {
+      setIsLoading(false);
     }
+  };
 
+  useEffect(() => {
     if (currentUser) {
       loadMarketplaceData();
     }
@@ -135,7 +134,6 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  // Seller manual stock deduction (for Local Pickup sales or offline adjustments)
   const handleSellerMarkSold = async (e, item) => {
     e.stopPropagation();
     const qtyToSell = Number(sellQuantities[item._id] || 1);
@@ -169,83 +167,48 @@ export default function App() {
     }
   };
 
-  // 4-OPTION CHECKOUT ENGINE
   const hasDeliveryItems = cart.some((item) => item.deliveryMethod === "delivery");
 
-  const finalizeOrder = async (chosenMethodLabel) => {
+  const finalizeOrder = async (paymentMethodCode, chosenMethodLabel) => {
     setIsProcessingOrder(true);
     setCheckoutError("");
 
     try {
-      const updatedListingsMap = {};
+      const res = await fetch(`${API_BASE}/api/orders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          buyerId: currentUser.id,
+          buyerName: currentUser.name,
+          buyerContact: currentUser.email || currentUser.phone || "N/A",
+          paymentMethod: paymentMethodCode,
+          paymentOptionLabel: chosenMethodLabel,
+          items: cart,
+          itemSubtotal: cartItemTotal,
+          deliveryTotal: cartDeliveryTotal,
+          grandTotal: cartGrandTotal,
+          lockboxPhoto
+        })
+      });
 
-      for (const item of cart) {
-        const qty = Number(item.quantity || 1);
-        const itemPrice = Number(item.price || 0) * qty;
-        const delivFee = Number(item.shippingCost || 0);
+      const savedOrder = await res.json();
+      if (!res.ok) throw new Error(savedOrder.error || "Could not create order");
 
-        if (item.deliveryMethod === "delivery") {
-          // Options 2, 3, and 4 automatically deduct stock from MongoDB
-          const stockRes = await fetch(`${API_BASE}/api/listings/${item._id}/deduct-stock`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ quantity: qty })
-          });
-          if (stockRes.ok) {
-            const updatedListing = await stockRes.json();
-            updatedListingsMap[item._id] = updatedListing;
-          }
-        }
+      await loadMarketplaceData();
 
-        // Send formal order receipt & coordination message to buyer/seller thread
-        const receiptMsg =
-          item.deliveryMethod === "pickup"
-            ? `🧾 ORDER PLACED (Option 1: Local Pickup)\nItem: ${qty}x ${item.title}\nItem Total: $${itemPrice.toLocaleString()} GYD\nDelivery Fee: $0 GYD\n\nHi ${item.sellerName}, I selected Local Pickup. Let's coordinate pickup details here!`
-            : `🧾 ORDER CONFIRMED (${chosenMethodLabel})\nItem: ${qty}x ${item.title}\nItem Price: $${itemPrice.toLocaleString()} GYD\nDelivery Charge: $${delivFee.toLocaleString()} GYD\nTotal Paid: $${(itemPrice + delivFee).toLocaleString()} GYD\nDeliver To: ${item.buyerAddress}`;
-
-        const convRes = await fetch(`${API_BASE}/api/conversations`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            listingId: item._id,
-            listingTitle: item.title,
-            buyerName: currentUser.name,
-            sellerName: item.sellerName,
-            initialMessage: receiptMsg
-          })
-        });
-
-        if (convRes.ok) {
-          const convData = await convRes.json();
-          setConversations((prev) => {
-            const exists = prev.some((c) => c._id === convData._id);
-            return exists
-              ? prev.map((c) => (c._id === convData._id ? convData : c))
-              : [convData, ...prev];
-          });
-          setActiveConvId(convData._id);
-        }
-      }
-
-      // Sync updated stock counts locally
-      setListings((prev) =>
-        prev.map((l) => (updatedListingsMap[l._id] ? updatedListingsMap[l._id] : l))
-      );
-
-      const receiptPayload = {
-        orderId: "ORD-" + Math.floor(100000 + Math.random() * 900000),
-        timestamp: new Date().toLocaleString(),
+      setCompletedOrder({
+        orderId: savedOrder.orderNumber,
+        status: savedOrder.status,
+        timestamp: new Date(savedOrder.createdAt).toLocaleString(),
         buyerName: currentUser.name,
         buyerContact: currentUser.email || currentUser.phone,
         paymentOptionLabel: chosenMethodLabel,
         items: [...cart],
         itemSubtotal: cartItemTotal,
         deliveryTotal: cartDeliveryTotal,
-        grandTotal: cartGrandTotal,
-        lockboxVerified: Boolean(lockboxPhoto)
-      };
+        grandTotal: cartGrandTotal
+      });
 
-      setCompletedOrder(receiptPayload);
       setCart([]);
       setCashVerifyStep(false);
       setLockboxPhoto(null);
@@ -259,13 +222,11 @@ export default function App() {
   const handleCheckoutSubmit = () => {
     setCheckoutError("");
 
-    // Option 1: Local Pickup Only
     if (!hasDeliveryItems) {
-      finalizeOrder("Option 1: Local Pickup (Pay & Pickup with Seller)");
+      finalizeOrder("pickup", "Option 1: Local Pickup (Pay & Pickup with Seller)");
       return;
     }
 
-    // Option 2: Delivery + Cash Lockbox
     if (deliveryPaymentMethod === "cash") {
       if (!cashVerifyStep) {
         setCashVerifyStep(true);
@@ -275,19 +236,17 @@ export default function App() {
         setCheckoutError("Please upload a photo of the cash in the lockbox to verify your payment.");
         return;
       }
-      finalizeOrder("Option 2: Delivery - Cash in Lockbox (Photo Verified)");
+      finalizeOrder("cash", "Option 2: Delivery - Cash in Lockbox (Pending Admin Confirmation)");
       return;
     }
 
-    // Option 3: Delivery + eTransfer to gogymarket.com
     if (deliveryPaymentMethod === "etransfer") {
-      finalizeOrder("Option 3: Delivery - eTransfer to gogymarket.com");
+      finalizeOrder("etransfer", "Option 3: Delivery - eTransfer to gogymarket.com (Pending Admin Verification)");
       return;
     }
 
-    // Option 4: Delivery + Credit Card
     if (deliveryPaymentMethod === "credit") {
-      finalizeOrder("Option 4: Delivery - Credit Card");
+      finalizeOrder("credit", "Option 4: Delivery - Credit Card (Active & Paid)");
     }
   };
 
@@ -339,7 +298,6 @@ export default function App() {
     }
   };
 
-  // Automatically hide listings where status === "sold" OR stockCount <= 0
   const filteredListings = useMemo(() => {
     return listings.filter((item) => {
       const stock = item.stockCount != null ? Number(item.stockCount) : 1;
@@ -407,6 +365,14 @@ export default function App() {
         />
       ) : (
         <>
+          {/* 7. ADMINISTRATION PORTAL VIEW */}
+          {activeTab === "admin" && (
+            <AdminDashboard
+              currentUser={currentUser}
+              onOrdersUpdated={loadMarketplaceData}
+            />
+          )}
+
           {/* 1. SEARCH PORTAL VIEW */}
           {activeTab === "search" && (
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -523,7 +489,6 @@ export default function App() {
                               {isFav ? "❤️" : "🤍"}
                             </button>
 
-                            {/* Highlight badge when only 1 left */}
                             {!isService && stock === 1 && (
                               <span className="absolute top-2 left-2 bg-red-600 text-white text-[11px] font-black px-2.5 py-1 rounded-full shadow-md animate-pulse">
                                 🔥 Only 1 Available!
@@ -565,16 +530,19 @@ export default function App() {
           {/* 6. SHOPPING CART, 4-OPTION CHECKOUT & SUCCESS RECEIPT VIEW */}
           {activeTab === "cart" && (
             <div className="max-w-4xl mx-auto space-y-6">
-              {/* ORDER SUCCESS RECEIPT SCREEN */}
               {completedOrder ? (
                 <div className="bg-white rounded-2xl border-2 border-emerald-500 shadow-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                   <div className="bg-emerald-600 text-white p-6 text-center">
                     <div className="w-14 h-14 bg-white text-emerald-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-3 shadow">
                       ✓
                     </div>
-                    <h2 className="text-2xl font-black">Order Confirmed!</h2>
+                    <h2 className="text-2xl font-black">Order Submitted!</h2>
                     <p className="text-emerald-100 text-sm mt-1">
-                      A copy of this breakdown has been sent to your account ({completedOrder.buyerContact}) & Messages.
+                      {completedOrder.status === "waiting_etransfer"
+                        ? "Status: Waiting on Payment for eTransfer (Admin will verify and notify seller)"
+                        : completedOrder.status === "waiting_cash"
+                        ? "Status: Waiting on Confirmation of Cash (Admin will verify lockbox photo and notify seller)"
+                        : "Status: Active & Confirmed! A full breakdown has been sent to your Messages."}
                     </p>
                   </div>
 
@@ -596,7 +564,7 @@ export default function App() {
 
                     <div className="space-y-3">
                       <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                        Items Purchased
+                        Items Breakdown
                       </h3>
                       {completedOrder.items.map((item) => (
                         <div
@@ -689,7 +657,6 @@ export default function App() {
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                      {/* LEFT: Cart Items OR Cash Lockbox Verification Screen */}
                       <div className="lg:col-span-2 space-y-4">
                         {cashVerifyStep ? (
                           <div className="bg-white p-6 rounded-xl border-2 border-emerald-500 shadow-sm space-y-5">
@@ -711,11 +678,11 @@ export default function App() {
                             </div>
 
                             <p className="text-sm text-slate-600 leading-relaxed">
-                              To complete your Cash Delivery order of{" "}
+                              To submit your Cash Delivery order of{" "}
                               <span className="font-bold text-slate-900">
                                 ${cartGrandTotal.toLocaleString()} GYD
                               </span>
-                              , please place the cash inside your delivery lockbox and upload a clear verification photo below.
+                              , place the cash inside your lockbox and upload a clear photo below. An Administrator will confirm it and notify the seller.
                             </p>
 
                             <div className="border-2 border-dashed border-slate-300 rounded-xl p-6 text-center bg-slate-50">
@@ -739,9 +706,6 @@ export default function App() {
                                   <span className="text-4xl">📸</span>
                                   <span className="font-bold text-sm text-emerald-700">
                                     Click to Take or Upload Lockbox Cash Photo
-                                  </span>
-                                  <span className="text-xs text-slate-400">
-                                    Required before driver dispatch
                                   </span>
                                   <input
                                     type="file"
@@ -792,7 +756,6 @@ export default function App() {
                         )}
                       </div>
 
-                      {/* RIGHT: Order Summary & 4 Purchase Options */}
                       <div className="bg-white p-6 rounded-xl border border-slate-200 h-fit space-y-4 sticky top-24 shadow-sm">
                         <h3 className="font-bold text-lg text-slate-900 border-b border-slate-200 pb-3">
                           Order & Payment Options
@@ -831,7 +794,7 @@ export default function App() {
                               <div>
                                 <p className="text-slate-900 font-bold">Option 2: Cash in Lockbox</p>
                                 <p className="text-slate-500 font-normal">
-                                  Requires uploading a photo of cash in lockbox
+                                  Upload photo of cash; Admin confirms & notifies seller
                                 </p>
                               </div>
                             </label>
@@ -857,7 +820,7 @@ export default function App() {
                               <div>
                                 <p className="text-slate-900 font-bold">Option 3: eTransfer</p>
                                 <p className="text-slate-500 font-normal">
-                                  Send eTransfer to <span className="font-bold text-slate-800">gogymarket.com</span>
+                                  Send to <span className="font-bold text-slate-800">gogymarket.com</span> (Admin verifies & notifies seller)
                                 </p>
                               </div>
                             </label>
@@ -881,8 +844,10 @@ export default function App() {
                                 className="mt-0.5"
                               />
                               <div>
-                                <p className="text-slate-900 font-bold">Option 4: Credit Card</p>
-                                <p className="text-slate-500 font-normal">Instant checkout approval</p>
+                                <p className="text-slate-900 font-bold">Option 4: Credit Card (Stripe)</p>
+                                <p className="text-slate-500 font-normal">
+                                  Automatically active & paid upon completion
+                                </p>
                               </div>
                             </label>
                           </div>
@@ -970,11 +935,19 @@ export default function App() {
                     <div className="space-y-3 overflow-y-auto max-h-80">
                       {activeConversation.messages.map((m, idx) => {
                         const isMe = m.sender === currentUser.name;
+                        const isAdminMsg = m.sender === "GoGyMarket Admin";
                         return (
-                          <div key={idx} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
+                          <div
+                            key={idx}
+                            className={`flex flex-col ${
+                              isAdminMsg ? "items-center" : isMe ? "items-end" : "items-start"
+                            }`}
+                          >
                             <div
                               className={`px-3.5 py-2 rounded-xl text-sm max-w-md whitespace-pre-wrap ${
-                                isMe
+                                isAdminMsg
+                                  ? "bg-amber-50 border border-amber-300 text-amber-950 font-medium"
+                                  : isMe
                                   ? "bg-emerald-600 text-white"
                                   : "bg-white border border-slate-200 text-slate-800"
                               }`}
@@ -1085,7 +1058,6 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Seller Stock Deduction Controls */}
                         <div
                           className="flex flex-wrap items-center gap-2 self-end sm:self-center"
                           onClick={(e) => e.stopPropagation()}
