@@ -18,7 +18,8 @@ export default function PostListingForm({
     subcategory: initialSubcategory,
     pricingType: initialCategory === "Services" ? "hourly" : "fixed",
     price: "",
-    location: currentUser.location || "Toronto, ON",
+    stockCount: "1",
+    location: currentUser?.location || "Toronto, ON",
     description: "",
     images: []
   });
@@ -100,7 +101,13 @@ export default function PostListingForm({
       (formData.pricingType === "fixed" || formData.pricingType === "hourly") &&
       (formData.price === "" || Number(formData.price) < 0)
     ) {
-      setError("Please enter a dollar amount in the Price box (or choose 'Free').");
+      setError("Please enter a valid amount in the Price box (or choose 'Free').");
+      return;
+    }
+
+    const parsedStock = parseInt(formData.stockCount, 10);
+    if (!isService && (isNaN(parsedStock) || parsedStock < 1)) {
+      setError("Please enter a valid Stock Count (minimum 1).");
       return;
     }
 
@@ -117,6 +124,7 @@ export default function PostListingForm({
         formData.pricingType === "free" || formData.pricingType === "contact_for_quote"
           ? 0
           : Number(formData.price),
+      stockCount: isService ? 999 : parsedStock,
       location: formData.location.trim(),
       description: formData.description.trim(),
       images:
@@ -166,7 +174,6 @@ export default function PostListingForm({
       </div>
 
       <form onSubmit={handleSubmit} noValidate className="p-6 space-y-8">
-        
         {/* STEP 1: CASCADING CATEGORY & SUBCATEGORY */}
         <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-4">
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -233,7 +240,7 @@ export default function PostListingForm({
               placeholder={
                 isService
                   ? "e.g., Licensed Electrician - Panel Upgrades & EV Chargers"
-                  : "e.g., iPad Pro 11-inch 256GB Wi-Fi - Mint Condition"
+                  : "e.g., Fresh Homemade Jamaican Patties"
               }
               value={formData.title}
               onChange={(e) =>
@@ -252,7 +259,7 @@ export default function PostListingForm({
               placeholder={
                 isService
                   ? "Describe your experience, service area, minimum call-out fee, and availability..."
-                  : "Include condition, storage size, accessories included..."
+                  : "Include condition, specifications, and details buyers should know..."
               }
               value={formData.description}
               onChange={(e) =>
@@ -263,10 +270,10 @@ export default function PostListingForm({
           </div>
         </div>
 
-        {/* STEP 3: DYNAMIC PRICING & LOCATION */}
+        {/* STEP 3: DYNAMIC PRICING, STOCK COUNT & LOCATION */}
         <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-5">
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-            Step 3: Pricing & Origin Location
+            Step 3: Pricing, Stock & Origin Location
           </h3>
 
           <div className="flex flex-wrap gap-2">
@@ -294,7 +301,7 @@ export default function PostListingForm({
             ))}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {(formData.pricingType === "fixed" || formData.pricingType === "hourly") && (
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">
@@ -322,7 +329,26 @@ export default function PostListingForm({
               </div>
             )}
 
-            <div>
+            {!isService && (
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">
+                  Quantity / Stock Available *
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  placeholder="e.g. 10"
+                  value={formData.stockCount}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, stockCount: e.target.value }))
+                  }
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+            )}
+
+            <div className={isService ? "sm:col-span-2" : ""}>
               <label className="block text-sm font-semibold text-slate-700 mb-1">
                 Item Location (Origin Address) *
               </label>
@@ -335,9 +361,6 @@ export default function PostListingForm({
                 }
                 className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
               />
-              <p className="text-[10px] text-slate-500 mt-1">
-                Used by Google Maps to calculate delivery fees for buyers.
-              </p>
             </div>
           </div>
         </div>
