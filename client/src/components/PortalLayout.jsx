@@ -8,6 +8,8 @@ export default function PortalLayout({
   counts,
   children
 }) {
+  const isStaff = currentUser?.role === "admin" || currentUser?.role === "viewer";
+
   const navItems = [
     { id: "search", label: "Search", icon: "🔍", badge: null },
     { id: "messages", label: "Messages", icon: "💬", badge: counts.unreadMessages },
@@ -16,6 +18,15 @@ export default function PortalLayout({
     { id: "favourites", label: "Saved", icon: "❤️", badge: counts.favourites },
     { id: "cart", label: "Cart", icon: "🛒", badge: counts.cart }
   ];
+
+  if (isStaff) {
+    navItems.push({
+      id: "admin",
+      label: currentUser.role === "admin" ? "Admin Portal" : "Viewer Portal",
+      icon: "🛡️",
+      badge: null
+    });
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
@@ -34,18 +45,24 @@ export default function PortalLayout({
             </div>
           </div>
 
-          {/* Signed-in User Pill with safe fallbacks and Logout */}
           <div className="flex items-center gap-3 bg-slate-900 px-3 py-1.5 rounded-full border border-slate-800">
             <div className="w-7 h-7 rounded-full bg-emerald-500 text-slate-950 font-bold flex items-center justify-center text-sm">
               {(currentUser?.name || "U").charAt(0).toUpperCase()}
             </div>
             <div className="hidden sm:block text-left mr-2">
-              <p className="text-xs font-semibold leading-none">{currentUser?.name || "User"}</p>
-              <p className="text-[11px] text-emerald-400 leading-tight truncate max-w-[100px]">
+              <div className="flex items-center gap-1.5">
+                <p className="text-xs font-semibold leading-none">{currentUser?.name || "User"}</p>
+                {isStaff && (
+                  <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[9px] font-black uppercase px-1.5 py-0.2 rounded">
+                    {currentUser.role}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-emerald-400 leading-tight truncate max-w-[120px]">
                 {currentUser?.location || "Unknown"}
               </p>
             </div>
-            <button 
+            <button
               onClick={() => {
                 localStorage.removeItem("gogy_user");
                 localStorage.removeItem("gogy_token");
