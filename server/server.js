@@ -3,11 +3,6 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");// server/server.js
-const express = require("express");
-const mongoose = require("mongoose");
-const cors = require("cors");
-const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
 
@@ -24,7 +19,6 @@ app.use(express.json({ limit: "15mb" }));
 
 const JWT_SECRET = process.env.JWT_SECRET || "gogy_super_secret_dev_key_2026";
 
-// Helper: Strict Password Validator (Min 10 chars, 1 uppercase, mix of letters & numbers)
 function validateStrictPassword(pw) {
   if (!pw || pw.length < 10) return "Password must be at least 10 characters long.";
   if (!/[A-Z]/.test(pw)) return "Password must contain at least one capital letter.";
@@ -155,7 +149,6 @@ const orderSchema = new mongoose.Schema(
 
 const Order = mongoose.model("Order", orderSchema);
 
-// NEW: Two-Way Post-Payment Rating Schema
 const ratingSchema = new mongoose.Schema(
   {
     orderId: { type: String, required: true, index: true },
@@ -269,7 +262,6 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// AUTH ROUTES
 app.post("/api/auth/register", async (req, res) => {
   try {
     const { accountType, firstName, lastName, businessName, contactMethod, password, location } = req.body;
@@ -460,7 +452,6 @@ app.post("/api/orders", async (req, res) => {
   }
 });
 
-// GET orders involving a specific user (as Buyer or Seller) so they can rate completed transactions
 app.get("/api/orders/user/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -473,7 +464,6 @@ app.get("/api/orders/user/:userId", async (req, res) => {
   }
 });
 
-// GET all ratings submitted by or received by a user
 app.get("/api/ratings", async (req, res) => {
   try {
     const ratings = await Rating.find().sort({ createdAt: -1 });
@@ -483,7 +473,6 @@ app.get("/api/ratings", async (req, res) => {
   }
 });
 
-// POST submit a rating (Strictly requires order.status === "active")
 app.post("/api/ratings", async (req, res) => {
   try {
     const {
@@ -510,7 +499,6 @@ app.post("/api/ratings", async (req, res) => {
       return res.status(404).json({ error: "Order not found." });
     }
 
-    // Enforce Rule: Ratings can ONLY occur when a transaction is paid & active
     if (order.status !== "active") {
       return res.status(400).json({
         error: "Ratings can only be submitted after payment has been confirmed and the transaction is Active."
@@ -543,7 +531,6 @@ app.post("/api/ratings", async (req, res) => {
       comment: comment.trim()
     });
 
-    // Recalculate Target User's average rating
     const allTargetRatings = await Rating.find({ targetUserId });
     const totalStars = allTargetRatings.reduce((sum, r) => sum + r.stars, 0);
     const avg = Number((totalStars / allTargetRatings.length).toFixed(1));
@@ -563,7 +550,6 @@ app.post("/api/ratings", async (req, res) => {
 // 5. ADMINISTRATION PORTAL & ANALYTICS ROUTES
 // ==========================================
 
-// GET Marketplace Analytics & Stats (Admin & Viewer)
 app.get("/api/admin/stats", verifyStaff, async (req, res) => {
   try {
     const [listings, orders, ratings] = await Promise.all([
@@ -572,7 +558,6 @@ app.get("/api/admin/stats", verifyStaff, async (req, res) => {
       Rating.find()
     ]);
 
-    // 1. Most Popular Items / Categories Posted
     const itemTitleCounts = {};
     const subcategoryCounts = {};
     listings.forEach((l) => {
@@ -592,7 +577,6 @@ app.get("/api/admin/stats", verifyStaff, async (req, res) => {
       .sort((a, b) => b.count - a.count)
       .slice(0, 5);
 
-    // 2. Most Common Delivery Method (Pickup vs Delivery)
     const deliveryCounts = { pickup: 0, delivery: 0 };
     orders.forEach((o) => {
       o.items.forEach((item) => {
@@ -611,7 +595,6 @@ app.get("/api/admin/stats", verifyStaff, async (req, res) => {
         ? "Local Pickup"
         : "Tied (Pickup & Delivery)";
 
-    // 3. Most Popular Payment Type (Cash, eTransfer, Credit)
     const paymentCounts = { cash: 0, etransfer: 0, credit: 0 };
     orders.forEach((o) => {
       if (paymentCounts[o.paymentMethod] != null) {
@@ -644,7 +627,6 @@ app.get("/api/admin/stats", verifyStaff, async (req, res) => {
   }
 });
 
-// GET all transactions (Admin and Viewer)
 app.get("/api/admin/orders", verifyStaff, async (req, res) => {
   try {
     const orders = await Order.find().sort({ createdAt: -1 });
@@ -654,7 +636,6 @@ app.get("/api/admin/orders", verifyStaff, async (req, res) => {
   }
 });
 
-// PATCH Verify eTransfer or Cash Payment -> Sets to Active & Notifies Seller (Admin Only)
 app.patch("/api/admin/orders/:id/verify", verifyStaff, requireFullAdmin, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
@@ -686,7 +667,6 @@ app.patch("/api/admin/orders/:id/verify", verifyStaff, requireFullAdmin, async (
   }
 });
 
-// PATCH Cancel any transaction & restore deducted stock (Admin Only)
 app.patch("/api/admin/orders/:id/cancel", verifyStaff, requireFullAdmin, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
@@ -727,7 +707,6 @@ app.patch("/api/admin/orders/:id/cancel", verifyStaff, requireFullAdmin, async (
   }
 });
 
-// GET all users (Admin and Viewer)
 app.get("/api/admin/users", verifyStaff, async (req, res) => {
   try {
     const users = await User.find().select("-password").sort({ createdAt: -1 });
@@ -737,7 +716,6 @@ app.get("/api/admin/users", verifyStaff, async (req, res) => {
   }
 });
 
-// POST Create a new User (Buyer/Seller), Admin, or Viewer account (Admin Only)
 app.post("/api/admin/users", verifyStaff, requireFullAdmin, async (req, res) => {
   try {
     const { name, contactMethod, password, role, accountType, location } = req.body;
@@ -792,7 +770,6 @@ app.post("/api/admin/users", verifyStaff, requireFullAdmin, async (req, res) => 
   }
 });
 
-// DELETE any user account (Admin Only)
 app.delete("/api/admin/users/:id", verifyStaff, requireFullAdmin, async (req, res) => {
   try {
     if (String(req.staffUser._id) === String(req.params.id)) {
@@ -802,7 +779,6 @@ app.delete("/api/admin/users/:id", verifyStaff, requireFullAdmin, async (req, re
     const deletedUser = await User.findByIdAndDelete(req.params.id);
     if (!deletedUser) return res.status(404).json({ error: "User not found." });
 
-    // Also clean up any active listings belonging to the deleted user
     await Listing.deleteMany({ sellerId: String(req.params.id) });
 
     res.json({ deleted: true, id: req.params.id, name: deletedUser.name });
@@ -811,804 +787,6 @@ app.delete("/api/admin/users/:id", verifyStaff, requireFullAdmin, async (req, re
   }
 });
 
-// PATCH Reset any user's password with strict password rules (Admin Only)
-app.patch("/api/admin/users/:id/reset-password", verifyStaff, requireFullAdmin, async (req, res) => {
-  try {
-    const { newPassword } = req.body;
-    const pwError = validateStrictPassword(newPassword);
-    if (pwError) return res.status(400).json({ error: pwError });
-
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(newPassword, salt);
-
-    const updatedUser = await User.findByIdAndUpdate(
-      req.params.id,
-      { password: hashedPassword },
-      { new: true }
-    ).select("-password");
-
-    if (!updatedUser) return res.status(404).json({ error: "User not found." });
-
-    res.json({ message: `Password successfully reset for ${updatedUser.name}.` });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-// ==========================================
-// 6. LISTINGS, CONVERSATIONS & SHIPPING ROUTES
-// ==========================================
-
-app.get("/api/listings", async (req, res) => {
-  try {
-    const listings = await Listing.find().sort({ createdAt: -1 });
-    res.json(listings);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post("/api/listings", async (req, res) => {
-  try {
-    const stock = req.body.stockCount != null ? Number(req.body.stockCount) : 1;
-    const newListing = await Listing.create({
-      ...req.body,
-      stockCount: stock,
-      status: stock > 0 ? "active" : "sold"
-    });
-    res.status(201).json(newListing);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.patch("/api/listings/:id/deduct-stock", async (req, res) => {
-  try {
-    const quantityToDeduct = Math.max(1, Number(req.body.quantity || 1));
-    const listing = await Listing.findById(req.params.id);
-    if (!listing) return res.status(404).json({ error: "Listing not found" });
-
-    const currentStock = listing.stockCount != null ? listing.stockCount : 1;
-    const newStock = Math.max(0, currentStock - quantityToDeduct);
-
-    listing.stockCount = newStock;
-    if (newStock === 0) {
-      listing.status = "sold";
-    }
-
-    await listing.save();
-    res.json(listing);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.patch("/api/listings/:id/status", async (req, res) => {
-  try {
-    const updateData = { status: req.body.status };
-    if (req.body.status === "sold") {
-      updateData.stockCount = 0;
-    }
-    const updated = await Listing.findByIdAndUpdate(req.params.id, updateData, { new: true });
-    res.json(updated);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.delete("/api/listings/:id", async (req, res) => {
-  try {
-    await Listing.findByIdAndDelete(req.params.id);
-    res.json({ deleted: true });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.get("/api/conversations", async (req, res) => {
-  try {
-    const convs = await Conversation.find().sort({ updatedAt: -1 });
-    res.json(convs);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to load conversations" });
-  }
-});
-
-app.post("/api/conversations", async (req, res) => {
-  try {
-    const { listingId, listingTitle, buyerName, sellerName, initialMessage } = req.body;
-    let conv = await Conversation.findOne({ listingId, buyerName });
-
-    const formattedTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const msgText = initialMessage || `Hi ${sellerName}, is "${listingTitle}" still available?`;
-
-    if (!conv) {
-      conv = await Conversation.create({
-        listingId,
-        listingTitle,
-        buyerName,
-        sellerName,
-        messages: [{ sender: buyerName, text: msgText, time: formattedTime }]
-      });
-    } else if (initialMessage) {
-      conv.messages.push({ sender: buyerName, text: initialMessage, time: formattedTime });
-      await conv.save();
-    }
-    res.status(201).json(conv);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.post("/api/conversations/:id/messages", async (req, res) => {
-  try {
-    const { sender, text } = req.body;
-    const conv = await Conversation.findById(req.params.id);
-    if (!conv) return res.status(404).json({ error: "Conversation not found" });
-
-    conv.messages.push({
-      sender,
-      text,
-      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    });
-    await conv.save();
-    res.json(conv);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.post("/api/shipping-quote", async (req, res) => {
-  try {
-    const { origin, destination } = req.body;
-    if (!process.env.GOOGLE_MAPS_API_KEY) return res.status(500).json({ error: "Google Maps API key missing." });
-
-    const mapUrl = "https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix";
-    const requestBody = {
-      origins: [{ waypoint: { address: origin } }],
-      destinations: [{ waypoint: { address: destination } }],
-      travelMode: "DRIVE"
-    };
-
-    const response = await fetch(mapUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": process.env.GOOGLE_MAPS_API_KEY,
-        "X-Goog-FieldMask": "originIndex,destinationIndex,duration,distanceMeters,status,condition"
-      },
-      body: JSON.stringify(requestBody)
-    });
-
-    const data = await response.json();
-
-    if (data.error) return res.status(400).json({ error: `Google API Error: ${data.error.message}` });
-
-    if (Array.isArray(data) && data.length > 0) {
-      if (data[0].distanceMeters != null) {
-        const distanceKm = Math.ceil(data[0].distanceMeters / 1000);
-        return res.json({
-          success: true,
-          distanceKm,
-          shippingCost: distanceKm * 20,
-          formattedDistance: `${distanceKm} km`
-        });
-      } else if (data[0].status && data[0].status.message) {
-        return res.status(400).json({ error: `Google Maps: ${data[0].status.message}` });
-      }
-    }
-    res.status(400).json({ error: "Could not calculate driving distance between these addresses." });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ==========================================
-// 7. DATABASE CONNECTION & SERVER START
-// ==========================================
-if (process.env.MONGO_URI) {
-  mongoose
-    .connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 8000 })
-    .then(async () => {
-      console.log("✅ Connected to MongoDB Atlas");
-      await initializeDatabase();
-    })
-    .catch((err) => console.error("❌ MongoDB connection error:", err.message));
-}
-
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-require("dotenv").config();
-
-const app = express();
-
-app.use(
-  cors({
-    origin: true,
-    credentials: true
-  })
-);
-
-app.use(express.json({ limit: "15mb" }));
-
-const JWT_SECRET = process.env.JWT_SECRET || "gogy_super_secret_dev_key_2026";
-
-// Helper: Strict Password Validator (Min 10 chars, 1 uppercase, mix of letters & numbers)
-function validateStrictPassword(pw) {
-  if (!pw || pw.length < 10) return "Password must be at least 10 characters long.";
-  if (!/[A-Z]/.test(pw)) return "Password must contain at least one capital letter.";
-  if (!/[a-zA-Z]/.test(pw) || !/\d/.test(pw)) {
-    return "Password must contain a mix of letters and numbers.";
-  }
-  return null;
-}
-
-// ==========================================
-// 1. MONGOOSE SCHEMAS & MODELS
-// ==========================================
-
-const userSchema = new mongoose.Schema(
-  {
-    accountType: { type: String, enum: ["personal", "business"], default: "personal" },
-    role: { type: String, enum: ["user", "admin", "viewer"], default: "user", index: true },
-    name: { type: String, required: true },
-    email: { type: String, lowercase: true },
-    phone: { type: String },
-    password: { type: String, required: true },
-    location: { type: String, required: true, default: "Toronto, ON" }
-  },
-  { timestamps: true }
-);
-
-const User = mongoose.model("User", userSchema);
-
-const listingSchema = new mongoose.Schema(
-  {
-    sellerId: { type: String, required: true, index: true },
-    sellerName: { type: String, required: true },
-    title: { type: String, required: true, trim: true },
-    category: { type: String, required: true, index: true },
-    subcategory: { type: String, required: true, index: true },
-    pricingType: {
-      type: String,
-      enum: ["fixed", "hourly", "free", "contact_for_quote"],
-      default: "fixed"
-    },
-    price: { type: Number, default: 0 },
-    stockCount: { type: Number, required: true, default: 1, min: 0 },
-    location: { type: String, required: true },
-    deliveryMethods: { type: [String], default: ["pickup"] },
-    deliveryFee: { type: Number, default: 0 },
-    description: { type: String, required: true },
-    images: [{ type: String }],
-    status: {
-      type: String,
-      enum: ["active", "pending", "sold"],
-      default: "active",
-      index: true
-    }
-  },
-  { timestamps: true }
-);
-
-const Listing = mongoose.model("Listing", listingSchema);
-
-const conversationSchema = new mongoose.Schema(
-  {
-    listingId: { type: String, required: true },
-    listingTitle: { type: String, required: true },
-    buyerName: { type: String, required: true },
-    sellerName: { type: String, required: true },
-    messages: [
-      {
-        sender: { type: String, required: true },
-        text: { type: String, required: true },
-        time: { type: String, required: true }
-      }
-    ]
-  },
-  { timestamps: true }
-);
-
-const Conversation = mongoose.model("Conversation", conversationSchema);
-
-// Persistent Order / Transaction Schema
-const orderSchema = new mongoose.Schema(
-  {
-    orderNumber: { type: String, required: true, unique: true },
-    buyerId: { type: String, required: true },
-    buyerName: { type: String, required: true },
-    buyerContact: { type: String },
-    paymentMethod: {
-      type: String,
-      enum: ["pickup", "cash", "etransfer", "credit"],
-      required: true
-    },
-    paymentOptionLabel: { type: String, required: true },
-    status: {
-      type: String,
-      enum: [
-        "waiting_etransfer", // Waiting on payment for eTransfer
-        "waiting_cash",      // Waiting on confirmation of cash
-        "active",            // Active & Paid (Auto for Stripe/Credit, or after Admin verifies Cash/eTransfer)
-        "pickup_pending",    // Option 1: Local Pickup
-        "cancelled"          // Cancelled by Admin
-      ],
-      required: true,
-      index: true
-    },
-    items: [
-      {
-        listingId: { type: String, required: true },
-        title: { type: String, required: true },
-        sellerId: { type: String },
-        sellerName: { type: String, required: true },
-        quantity: { type: Number, required: true, default: 1 },
-        unitPrice: { type: Number, required: true, default: 0 },
-        shippingCost: { type: Number, default: 0 },
-        deliveryMethod: { type: String, default: "pickup" },
-        buyerAddress: { type: String, default: "" },
-        image: { type: String }
-      }
-    ],
-    itemSubtotal: { type: Number, required: true, default: 0 },
-    deliveryTotal: { type: Number, required: true, default: 0 },
-    grandTotal: { type: Number, required: true, default: 0 },
-    lockboxPhoto: { type: String, default: null },
-    verifiedBy: { type: String, default: null },
-    verifiedAt: { type: Date, default: null }
-  },
-  { timestamps: true }
-);
-
-const Order = mongoose.model("Order", orderSchema);
-
-// ==========================================
-// 2. CLEANUP & MASTER ADMIN BOOTSTRAP
-// ==========================================
-async function initializeDatabase() {
-  try {
-    // 1. Purge old hardcoded sample listings
-    await Listing.deleteMany({
-      $or: [
-        { sellerId: { $in: ["usr_1", "usr_2", "usr_3"] } },
-        { sellerName: { $in: ["Sarah K.", "Errol D.", "Marcus T."] } }
-      ]
-    });
-
-    // 2. Ensure Master Admin exists
-    const masterEmail = "admin@gogymarket.com";
-    const existingAdmin = await User.findOne({ email: masterEmail });
-    if (!existingAdmin) {
-      const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash("AdminPass123", salt);
-      await User.create({
-        accountType: "business",
-        role: "admin",
-        name: "GoGyMarket Master Admin",
-        email: masterEmail,
-        password: hashedPassword,
-        location: "2033 Yonge Street, Toronto"
-      });
-      console.log("🛡️ Created Master Admin: admin@gogymarket.com (Password: AdminPass123)");
-    }
-  } catch (err) {
-    console.error("Initialization error:", err.message);
-  }
-}
-
-// Middleware to verify Admin or Viewer access
-async function verifyStaff(req, res, next) {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ error: "Unauthorized: Missing token" });
-    }
-    const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await User.findById(decoded.id);
-
-    if (!user || (user.role !== "admin" && user.role !== "viewer")) {
-      return res.status(403).json({ error: "Forbidden: Staff access required" });
-    }
-    req.staffUser = user;
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: "Invalid or expired session token" });
-  }
-}
-
-// Middleware to strictly require full Admin privileges (blocks Viewers from mutating)
-function requireFullAdmin(req, res, next) {
-  if (!req.staffUser || req.staffUser.role !== "admin") {
-    return res.status(403).json({ error: "View-only account: Only full Administrators can make changes." });
-  }
-  next();
-}
-
-// Helper to push system notifications into Seller/Buyer Conversations
-async function sendOrderNotification({ listingId, listingTitle, buyerName, sellerName, text }) {
-  const formattedTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  let conv = await Conversation.findOne({ listingId, buyerName });
-
-  if (!conv) {
-    conv = await Conversation.create({
-      listingId,
-      listingTitle,
-      buyerName,
-      sellerName,
-      messages: [{ sender: "GoGyMarket Admin", text, time: formattedTime }]
-    });
-  } else {
-    conv.messages.push({ sender: "GoGyMarket Admin", text, time: formattedTime });
-    await conv.save();
-  }
-  return conv;
-}
-
-// ==========================================
-// 3. API ROUTES
-// ==========================================
-
-app.get("/", (req, res) => {
-  res.send("GoGyMarket API is live. Visit /api/health for status.");
-});
-
-app.get("/api/health", (req, res) => {
-  res.json({
-    status: "ok",
-    service: "GoGyMarket API is running",
-    dbConnected: mongoose.connection.readyState === 1
-  });
-});
-
-// AUTH ROUTES
-app.post("/api/auth/register", async (req, res) => {
-  try {
-    const { accountType, firstName, lastName, businessName, contactMethod, password, location } = req.body;
-
-    const pwError = validateStrictPassword(password);
-    if (pwError) return res.status(400).json({ error: pwError });
-
-    const isEmail = contactMethod.includes("@");
-    const email = isEmail ? contactMethod.toLowerCase().trim() : undefined;
-    const phone = !isEmail ? contactMethod.trim() : undefined;
-
-    if (email) {
-      const existingUser = await User.findOne({ email });
-      if (existingUser) return res.status(400).json({ error: "This email is already registered." });
-    }
-    if (phone) {
-      const existingUser = await User.findOne({ phone });
-      if (existingUser) return res.status(400).json({ error: "This phone number is already registered." });
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-    const displayName = accountType === "business" ? businessName : `${firstName} ${lastName}`;
-
-    const newUser = await User.create({
-      accountType,
-      role: "user",
-      name: displayName,
-      email,
-      phone,
-      password: hashedPassword,
-      location: location || "Toronto, ON"
-    });
-
-    const token = jwt.sign({ id: newUser._id, role: newUser.role }, JWT_SECRET, { expiresIn: "7d" });
-
-    res.status(201).json({
-      token,
-      user: {
-        id: newUser._id,
-        name: newUser.name,
-        email: newUser.email,
-        phone: newUser.phone,
-        location: newUser.location,
-        role: newUser.role
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post("/api/auth/login", async (req, res) => {
-  try {
-    const { contactMethod, password } = req.body;
-    const isEmail = contactMethod.includes("@");
-
-    const query = isEmail ? { email: contactMethod.toLowerCase().trim() } : { phone: contactMethod.trim() };
-    const user = await User.findOne(query);
-
-    if (!user) return res.status(400).json({ error: "Invalid login credentials." });
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ error: "Invalid login credentials." });
-
-    const token = jwt.sign({ id: user._id, role: user.role || "user" }, JWT_SECRET, { expiresIn: "7d" });
-
-    res.json({
-      token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        location: user.location,
-        role: user.role || "user"
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ==========================================
-// 4. ORDER & CHECKOUT ROUTES
-// ==========================================
-
-app.post("/api/orders", async (req, res) => {
-  try {
-    const {
-      buyerId,
-      buyerName,
-      buyerContact,
-      paymentMethod, // "pickup" | "cash" | "etransfer" | "credit"
-      paymentOptionLabel,
-      items,
-      itemSubtotal,
-      deliveryTotal,
-      grandTotal,
-      lockboxPhoto
-    } = req.body;
-
-    if (!items || items.length === 0) {
-      return res.status(400).json({ error: "Cart cannot be empty." });
-    }
-
-    // Determine initial transaction state based on payment method
-    let initialStatus = "active";
-    if (paymentMethod === "etransfer") {
-      initialStatus = "waiting_etransfer";
-    } else if (paymentMethod === "cash") {
-      initialStatus = "waiting_cash";
-    } else if (paymentMethod === "pickup") {
-      initialStatus = "pickup_pending";
-    } else if (paymentMethod === "credit") {
-      initialStatus = "active"; // Automatically active and paid via Stripe/Credit
-    }
-
-    const orderNumber = "ORD-" + Math.floor(100000 + Math.random() * 900000);
-
-    // Deduct stock immediately for Delivery orders (Cash, eTransfer, Credit) to reserve inventory
-    for (const item of items) {
-      const qty = Math.max(1, Number(item.quantity || 1));
-      if (item.deliveryMethod === "delivery") {
-        const listing = await Listing.findById(item.listingId || item._id);
-        if (listing) {
-          const currentStock = listing.stockCount != null ? listing.stockCount : 1;
-          const newStock = Math.max(0, currentStock - qty);
-          listing.stockCount = newStock;
-          if (newStock === 0) listing.status = "sold";
-          await listing.save();
-        }
-      }
-    }
-
-    const formattedItems = items.map((i) => ({
-      listingId: i._id || i.listingId,
-      title: i.title,
-      sellerId: i.sellerId,
-      sellerName: i.sellerName,
-      quantity: Number(i.quantity || 1),
-      unitPrice: Number(i.price || i.unitPrice || 0),
-      shippingCost: Number(i.shippingCost || 0),
-      deliveryMethod: i.deliveryMethod || "pickup",
-      buyerAddress: i.buyerAddress || "",
-      image: i.images?.[0] || i.image || ""
-    }));
-
-    const newOrder = await Order.create({
-      orderNumber,
-      buyerId,
-      buyerName,
-      buyerContact,
-      paymentMethod,
-      paymentOptionLabel,
-      status: initialStatus,
-      items: formattedItems,
-      itemSubtotal: Number(itemSubtotal || 0),
-      deliveryTotal: Number(deliveryTotal || 0),
-      grandTotal: Number(grandTotal || 0),
-      lockboxPhoto: lockboxPhoto || null
-    });
-
-    // Send appropriate notifications
-    for (const item of formattedItems) {
-      const itemTotal = item.unitPrice * item.quantity;
-      let msg = "";
-
-      if (paymentMethod === "pickup") {
-        msg = `🧾 ORDER ${orderNumber} (Option 1: Local Pickup)\nItem: ${item.quantity}x ${item.title}\nItem Total: $${itemTotal.toLocaleString()} GYD\n\nBuyer ${buyerName} selected Local Pickup. Please coordinate pickup time and payment directly in this chat.`;
-      } else if (paymentMethod === "credit") {
-        msg = `✅ ORDER ${orderNumber} ACTIVE & PAID (Credit Card)\nItem: ${item.quantity}x ${item.title}\nItem Total: $${itemTotal.toLocaleString()} GYD\nDelivery Fee: $${item.shippingCost.toLocaleString()} GYD\nDeliver To: ${item.buyerAddress}\n\nPayment is complete! Seller ${item.sellerName}, please prepare this item for delivery pickup.`;
-      } else if (paymentMethod === "etransfer") {
-        msg = `⏳ ORDER ${orderNumber} PENDING ADMIN VERIFICATION (eTransfer to gogymarket.com)\nItem: ${item.quantity}x ${item.title}\nTotal Due: $${(itemTotal + item.shippingCost).toLocaleString()} GYD\n\nOnce GoGyMarket Admin verifies the eTransfer, the seller will be notified that the item is ready for pickup.`;
-      } else if (paymentMethod === "cash") {
-        msg = `⏳ ORDER ${orderNumber} PENDING ADMIN CASH CONFIRMATION (Lockbox Photo Uploaded)\nItem: ${item.quantity}x ${item.title}\nTotal Due: $${(itemTotal + item.shippingCost).toLocaleString()} GYD\n\nOnce GoGyMarket Admin confirms the cash lockbox photo, the seller will be notified that the item is ready for pickup.`;
-      }
-
-      await sendOrderNotification({
-        listingId: item.listingId,
-        listingTitle: item.title,
-        buyerName,
-        sellerName: item.sellerName,
-        text: msg
-      });
-    }
-
-    res.status(201).json(newOrder);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-// ==========================================
-// 5. ADMINISTRATION PORTAL ROUTES
-// ==========================================
-
-// GET all transactions (Accessible by Admin and Viewer)
-app.get("/api/admin/orders", verifyStaff, async (req, res) => {
-  try {
-    const orders = await Order.find().sort({ createdAt: -1 });
-    res.json(orders);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// PATCH Verify eTransfer or Cash Payment -> Sets to Active & Notifies Seller (Admin Only)
-app.patch("/api/admin/orders/:id/verify", verifyStaff, requireFullAdmin, async (req, res) => {
-  try {
-    const order = await Order.findById(req.params.id);
-    if (!order) return res.status(404).json({ error: "Order not found." });
-
-    if (order.status !== "waiting_etransfer" && order.status !== "waiting_cash") {
-      return res.status(400).json({ error: "Only pending eTransfer or Cash orders require manual verification." });
-    }
-
-    const previousType = order.status === "waiting_etransfer" ? "eTransfer" : "Cash Lockbox";
-    order.status = "active";
-    order.verifiedBy = req.staffUser.name;
-    order.verifiedAt = new Date();
-    await order.save();
-
-    // Notify Seller & Buyer that payment is verified and item is ready for pickup
-    for (const item of order.items) {
-      await sendOrderNotification({
-        listingId: item.listingId,
-        listingTitle: item.title,
-        buyerName: order.buyerName,
-        sellerName: item.sellerName,
-        text: `✅ PAYMENT VERIFIED BY ADMIN (${previousType})\nOrder: ${order.orderNumber}\nItem: ${item.quantity}x ${item.title}\nDeliver To: ${item.buyerAddress}\n\n🔔 Notification to Seller (${item.sellerName}): Payment has been verified by GoGyMarket Admin. Your item is now ACTIVE and ready for delivery pickup!`
-      });
-    }
-
-    res.json(order);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-// PATCH Cancel any transaction & restore deducted stock (Admin Only)
-app.patch("/api/admin/orders/:id/cancel", verifyStaff, requireFullAdmin, async (req, res) => {
-  try {
-    const order = await Order.findById(req.params.id);
-    if (!order) return res.status(404).json({ error: "Order not found." });
-    if (order.status === "cancelled") {
-      return res.status(400).json({ error: "Order is already cancelled." });
-    }
-
-    // Restore stock for delivery items if the order wasn't already cancelled
-    for (const item of order.items) {
-      if (item.deliveryMethod === "delivery") {
-        const listing = await Listing.findById(item.listingId);
-        if (listing) {
-          listing.stockCount = (listing.stockCount || 0) + Number(item.quantity || 1);
-          if (listing.stockCount > 0 && listing.status === "sold") {
-            listing.status = "active";
-          }
-          await listing.save();
-        }
-      }
-
-      await sendOrderNotification({
-        listingId: item.listingId,
-        listingTitle: item.title,
-        buyerName: order.buyerName,
-        sellerName: item.sellerName,
-        text: `❌ ORDER CANCELLED BY ADMIN\nOrder: ${order.orderNumber}\nItem: ${item.quantity}x ${item.title}\n\nThis transaction has been cancelled by GoGyMarket Administration and any reserved stock has been returned to the listing.`
-      });
-    }
-
-    order.status = "cancelled";
-    order.verifiedBy = req.staffUser.name;
-    order.verifiedAt = new Date();
-    await order.save();
-
-    res.json(order);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-// GET all users (Accessible by Admin and Viewer)
-app.get("/api/admin/users", verifyStaff, async (req, res) => {
-  try {
-    const users = await User.find().select("-password").sort({ createdAt: -1 });
-    res.json(users);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// POST Create a new Admin or Viewer account (Admin Only)
-app.post("/api/admin/users", verifyStaff, requireFullAdmin, async (req, res) => {
-  try {
-    const { name, contactMethod, password, role, location } = req.body;
-
-    if (!["admin", "viewer"].includes(role)) {
-      return res.status(400).json({ error: "Role must be either 'admin' or 'viewer'." });
-    }
-
-    const pwError = validateStrictPassword(password);
-    if (pwError) return res.status(400).json({ error: pwError });
-
-    const isEmail = contactMethod.includes("@");
-    const email = isEmail ? contactMethod.toLowerCase().trim() : undefined;
-    const phone = !isEmail ? contactMethod.trim() : undefined;
-
-    if (email) {
-      const exists = await User.findOne({ email });
-      if (exists) return res.status(400).json({ error: "Email is already in use." });
-    }
-    if (phone) {
-      const exists = await User.findOne({ phone });
-      if (exists) return res.status(400).json({ error: "Phone number is already in use." });
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    const newStaff = await User.create({
-      accountType: "business",
-      role,
-      name: name.trim(),
-      email,
-      phone,
-      password: hashedPassword,
-      location: location || "Toronto, ON"
-    });
-
-    res.status(201).json({
-      _id: newStaff._id,
-      name: newStaff.name,
-      email: newStaff.email,
-      phone: newStaff.phone,
-      role: newStaff.role,
-      accountType: newStaff.accountType,
-      location: newStaff.location,
-      createdAt: newStaff.createdAt
-    });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-// PATCH Reset any user's password with strict password rules (Admin Only)
 app.patch("/api/admin/users/:id/reset-password", verifyStaff, requireFullAdmin, async (req, res) => {
   try {
     const { newPassword } = req.body;
