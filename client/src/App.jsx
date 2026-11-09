@@ -16,8 +16,9 @@ export default function App() {
   });
 
   const isStaff = currentUser?.role === "admin" || currentUser?.role === "viewer";
+  const isDriver = currentUser?.role === "driver";
 
-  const [activeTab, setActiveTab] = useState(isStaff ? "admin" : "search");
+  const [activeTab, setActiveTab] = useState(isDriver ? "driver" : isStaff ? "admin" : "search");
   const [selectedListing, setSelectedListing] = useState(null);
   const [listings, setListings] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -47,6 +48,9 @@ export default function App() {
   const [ratingComment, setRatingComment] = useState({});
   const [ratingError, setRatingError] = useState("");
 
+  // NEW: Driver Orders State
+  const [driverOrders, setDriverOrders] = useState([]);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCat, setSelectedCat] = useState("");
   const [selectedSubcat, setSelectedSubcat] = useState("");
@@ -73,7 +77,7 @@ export default function App() {
         if (convsData.length > 0 && !activeConvId) setActiveConvId(convsData[0]._id);
       }
 
-      if (currentUser && !isStaff) {
+      if (currentUser && !isStaff && !isDriver) {
         const [ordersRes, ratingsRes] = await Promise.all([
           fetch(`${API_BASE}/api/orders/user/${currentUser.id}`),
           fetch(`${API_BASE}/api/ratings`)
@@ -88,9 +92,24 @@ export default function App() {
     }
   };
 
+  const loadDriverData = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/driver/orders`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("gogy_token")}` }
+      });
+      if (res.ok) setDriverOrders(await res.json());
+    } catch (err) {
+      console.error("Error loading driver data:", err);
+    }
+  };
+
   useEffect(() => {
     if (currentUser) {
-      loadMarketplaceData();
+      if (isDriver) {
+        loadDriverData();
+      } else {
+        loadMarketplaceData();
+      }
     }
   }, [currentUser]);
 
@@ -140,6 +159,15 @@ export default function App() {
     setCart((prev) => prev.filter((item) => item.cartItemId !== cartItemId));
   };
 
+  // NEW: Update Cart Item Details (Pin Drops & Instructions)
+  const handleCartDetailChange = (cartItemId, field, value) => {
+    setCart((prev) =>
+      prev.map((item) =>
+        item.cartItemId === cartItemId ? { ...item, [field]: value } : item
+      )
+    );
+  };
+
   const handleLockboxPhotoUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -173,12 +201,8 @@ export default function App() {
   const handleDeleteListing = async (e, listingId) => {
     e.stopPropagation();
     try {
-      const res = await fetch(`${API_BASE}/api/listings/${listingId}`, {
-        method: "DELETE"
-      });
-      if (res.ok) {
-        setListings((prev) => prev.filter((item) => item._id !== listingId));
-      }
+      const res = await fetch(`${API_BASE}/api/listings/${listingId}`, { method: "DELETE" });
+      if (res.ok) setListings((prev) => prev.filter((item) => item._id !== listingId));
     } catch (err) {
       console.error("Failed to delete listing:", err);
     }
@@ -298,7 +322,6 @@ export default function App() {
   const handleSendReply = async (e) => {
     e.preventDefault();
     if (!replyText.trim() || !activeConvId) return;
-
     try {
       const res = await fetch(`${API_BASE}/api/conversations/${activeConvId}/messages`, {
         method: "POST",
@@ -315,12 +338,9 @@ export default function App() {
     }
   };
 
-  // NEW: Delete an individual message
   const handleDeleteMessage = async (convId, msgId) => {
     try {
-      const res = await fetch(`${API_BASE}/api/conversations/${convId}/messages/${msgId}`, {
-        method: "DELETE"
-      });
+      const res = await fetch(`${API_BASE}/api/conversations/${convId}/messages/${msgId}`, { method: "DELETE" });
       if (res.ok) {
         const updatedConv = await res.json();
         setConversations((prev) => prev.map((c) => (c._id === convId ? updatedConv : c)));
@@ -330,16 +350,12 @@ export default function App() {
     }
   };
 
-  // NEW: Delete an entire conversation thread
   const handleDeleteConversation = async (e, convId) => {
     e.stopPropagation();
     const confirmed = window.confirm("Are you sure you want to permanently delete this entire conversation?");
     if (!confirmed) return;
-
     try {
-      const res = await fetch(`${API_BASE}/api/conversations/${convId}`, {
-        method: "DELETE"
-      });
+      const res = await fetch(`${API_BASE}/api/conversations/${convId}`, { method: "DELETE" });
       if (res.ok) {
         setConversations((prev) => prev.filter((c) => c._id !== convId));
         if (activeConvId === convId) setActiveConvId(null);
@@ -364,15 +380,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          orderId,
-          listingId,
-          raterId: currentUser.id,
-          raterName: currentUser.name,
-          raterRole,
-          targetUserId,
-          targetUserName,
-          stars,
-          comment
+          orderId, listingId, raterId: currentUser.id, raterName: currentUser.name, raterRole, targetUserId, targetUserName, stars, comment
         })
       });
       const data = await res.json();
@@ -380,11 +388,27 @@ export default function App() {
 
       setAllRatings((prev) => [data, ...prev]);
       alert("Rating submitted successfully!");
-      
-      // Refresh to pull down the newly updated seller global average from the backend
       loadMarketplaceData();
     } catch (err) {
       setRatingError(err.message);
+    }
+  };
+
+  // NEW: Driver function to accept an order
+  const handleAcceptDelivery = async (orderId) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/driver/orders/${orderId}/accept`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${localStorage.getItem("gogy_token")}` }
+      });
+      if (res.ok) {
+        loadDriverData();
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to accept delivery");
+      }
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -439,9 +463,86 @@ export default function App() {
         orders: myOrders.length
       }}
     >
-      {isStaff ? (
+      {/* 1. DRIVER PORTAL */}
+      {isDriver && activeTab === "driver" ? (
+        <div className="max-w-4xl mx-auto space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900">Driver Delivery Portal</h2>
+              <p className="text-xs text-slate-500">View and accept pending delivery requests.</p>
+            </div>
+            <button onClick={loadDriverData} className="text-xs font-bold text-emerald-700 hover:underline">
+              ↻ Refresh Requests
+            </button>
+          </div>
+          
+          {driverOrders.length === 0 ? (
+            <div className="bg-white p-12 rounded-xl border border-slate-200 text-center text-slate-500">
+              No active or pending delivery requests at the moment.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {driverOrders.map((order) => (
+                <div key={order._id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                  <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                    <div>
+                      <span className="font-black text-slate-900">{order.orderNumber}</span>
+                      <span className={`ml-3 text-[11px] font-bold px-2.5 py-1 rounded-full ${order.dispatchStatus === 'pending' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                        {order.dispatchStatus === 'pending' ? '⏳ Pending Dispatch' : '🚚 Active (Accepted by You)'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500">Placed: {new Date(order.createdAt).toLocaleString()}</p>
+                  </div>
+                  
+                  {order.items.filter(i => i.deliveryMethod === 'delivery').map((item, idx) => (
+                    <div key={idx} className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
+                      <p className="font-bold text-slate-900 text-sm">{item.quantity}x {item.title}</p>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                        <div className="bg-white p-3 rounded border border-slate-200">
+                          <p className="font-bold text-slate-500 uppercase mb-1">Pickup From (Seller)</p>
+                          <p className="font-semibold text-slate-800">{item.sellerName}</p>
+                          <p className="text-slate-600">{item.sellerLocation}</p>
+                        </div>
+                        
+                        <div className="bg-white p-3 rounded border border-slate-200">
+                          <p className="font-bold text-slate-500 uppercase mb-1">Deliver To (Buyer)</p>
+                          <p className="font-semibold text-slate-800">{order.buyerName} ({order.buyerContact})</p>
+                          {item.buyerLocationType === 'pin' ? (
+                            <a href={item.buyerPin} target="_blank" rel="noreferrer" className="text-blue-600 underline font-semibold break-all">📍 View Pin Drop Location</a>
+                          ) : (
+                            <p className="text-slate-600">{item.buyerAddress}</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {item.specialInstructions && (
+                        <div className="mt-2 bg-amber-50 p-3 rounded-lg border border-amber-200 text-xs">
+                          <span className="font-bold text-amber-800">Special Instructions: </span>
+                          <span className="text-amber-900">{item.specialInstructions}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+
+                  {order.dispatchStatus === 'pending' && (
+                    <button 
+                      onClick={() => handleAcceptDelivery(order._id)}
+                      className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-lg shadow-md transition-colors"
+                    >
+                      Accept Delivery Request
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : isStaff ? (
+        /* 2. ADMIN PORTAL */
         <AdminDashboard currentUser={currentUser} onOrdersUpdated={loadMarketplaceData} />
       ) : selectedListing ? (
+        /* 3. PRODUCT DETAIL VIEW */
         <ListingDetail
           listing={selectedListing}
           onClose={() => setSelectedListing(null)}
@@ -458,6 +559,7 @@ export default function App() {
         />
       ) : (
         <>
+          {/* 4. MARKETPLACE / SEARCH */}
           {activeTab === "search" && (
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               <aside className="bg-white p-4 rounded-xl border border-slate-200 h-fit space-y-4">
@@ -615,6 +717,7 @@ export default function App() {
             </div>
           )}
 
+          {/* 5. SHOPPING CART & CHECKOUT */}
           {activeTab === "cart" && (
             <div className="max-w-4xl mx-auto space-y-6">
               {completedOrder ? (
@@ -672,7 +775,7 @@ export default function App() {
                                 Seller: {item.sellerName} •{" "}
                                 {item.deliveryMethod === "pickup"
                                   ? `Local Pickup (${item.location})`
-                                  : `Deliver to: ${item.buyerAddress}`}
+                                  : `Deliver to: ${item.buyerLocationType === 'pin' ? 'Pin Drop' : item.buyerAddress}`}
                               </p>
                             </div>
                           </div>
@@ -809,35 +912,72 @@ export default function App() {
                           cart.map((item) => (
                             <div
                               key={item.cartItemId}
-                              className="bg-white p-4 rounded-xl border border-slate-200 flex gap-4"
+                              className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col gap-4"
                             >
-                              <img
-                                src={item.images?.[0]}
-                                alt={item.title}
-                                className="w-24 h-24 rounded-lg object-cover border border-slate-100"
-                              />
-                              <div className="flex-1 flex flex-col">
-                                <h3 className="font-bold text-slate-900 line-clamp-2 leading-tight">
-                                  {item.quantity || 1}x {item.title}
-                                </h3>
-                                <p className="text-emerald-700 font-extrabold mt-1">
-                                  ${(Number(item.price) * Number(item.quantity || 1)).toLocaleString()} GYD
-                                </p>
+                              <div className="flex gap-4">
+                                <img
+                                  src={item.images?.[0]}
+                                  alt={item.title}
+                                  className="w-24 h-24 rounded-lg object-cover border border-slate-100"
+                                />
+                                <div className="flex-1 flex flex-col">
+                                  <h3 className="font-bold text-slate-900 line-clamp-2 leading-tight">
+                                    {item.quantity || 1}x {item.title}
+                                  </h3>
+                                  <p className="text-emerald-700 font-extrabold mt-1">
+                                    ${(Number(item.price) * Number(item.quantity || 1)).toLocaleString()} GYD
+                                  </p>
 
-                                <div className="mt-auto pt-2 flex items-center justify-between">
-                                  <div className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded text-xs font-semibold">
-                                    {item.deliveryMethod === "pickup"
-                                      ? "🚶 Option 1: Local Pickup (Free)"
-                                      : `🚚 Delivery (+$${Number(item.shippingCost).toLocaleString()} GYD)`}
+                                  <div className="mt-auto pt-2 flex items-center justify-between">
+                                    <div className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded text-xs font-semibold">
+                                      {item.deliveryMethod === "pickup"
+                                        ? "🚶 Option 1: Local Pickup (Free)"
+                                        : `🚚 Delivery (+$${Number(item.shippingCost).toLocaleString()} GYD)`}
+                                    </div>
+                                    <button
+                                      onClick={() => handleRemoveFromCart(item.cartItemId)}
+                                      className="text-red-500 text-xs font-bold hover:underline"
+                                    >
+                                      Remove
+                                    </button>
                                   </div>
-                                  <button
-                                    onClick={() => handleRemoveFromCart(item.cartItemId)}
-                                    className="text-red-500 text-xs font-bold hover:underline"
-                                  >
-                                    Remove
-                                  </button>
                                 </div>
                               </div>
+
+                              {/* NEW: Cart Special Instructions & Pin Drop UI */}
+                              {item.deliveryMethod === "delivery" && (
+                                <div className="mt-2 bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-3">
+                                  <div className="flex items-center gap-2">
+                                    <label className="text-[11px] font-bold text-slate-700 uppercase">Location Type:</label>
+                                    <select
+                                      value={item.buyerLocationType || "address"}
+                                      onChange={(e) => handleCartDetailChange(item.cartItemId, "buyerLocationType", e.target.value)}
+                                      className="text-xs border border-slate-300 rounded px-1.5 py-1"
+                                    >
+                                      <option value="address">Street Address</option>
+                                      <option value="pin">Pin Drop URL</option>
+                                    </select>
+                                  </div>
+                                  
+                                  {item.buyerLocationType === "pin" && (
+                                    <input
+                                      type="text"
+                                      placeholder="Paste Google Maps Pin URL here..."
+                                      value={item.buyerPin || ""}
+                                      onChange={(e) => handleCartDetailChange(item.cartItemId, "buyerPin", e.target.value)}
+                                      className="w-full text-xs border border-slate-300 rounded px-2 py-2 focus:border-emerald-500 focus:outline-none"
+                                    />
+                                  )}
+
+                                  <input
+                                    type="text"
+                                    placeholder="Special delivery instructions for the driver (e.g. Call when outside)..."
+                                    value={item.specialInstructions || ""}
+                                    onChange={(e) => handleCartDetailChange(item.cartItemId, "specialInstructions", e.target.value)}
+                                    className="w-full text-xs border border-slate-300 rounded px-2 py-2 focus:border-emerald-500 focus:outline-none"
+                                  />
+                                </div>
+                              )}
                             </div>
                           ))
                         )}
@@ -985,7 +1125,7 @@ export default function App() {
             </div>
           )}
 
-          {/* ORDERS & RATINGS PORTAL TAB */}
+          {/* 6. ORDERS & RATINGS PORTAL TAB */}
           {activeTab === "orders" && (
             <div className="max-w-4xl mx-auto space-y-6">
               <div className="flex items-center justify-between">
@@ -1179,7 +1319,7 @@ export default function App() {
             </div>
           )}
 
-          {/* MESSAGES VIEW */}
+          {/* 7. MESSAGES VIEW */}
           {activeTab === "messages" && (
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden grid grid-cols-1 md:grid-cols-3 min-h-[480px]">
               <div className="border-r border-slate-200 p-4 space-y-2 overflow-y-auto max-h-[480px]">
@@ -1235,7 +1375,7 @@ export default function App() {
                             }`}
                           >
                             <div className="flex items-center gap-2">
-                              {/* Delete Individual Message (Only for non-admin messages if it's the user's side, or let them delete any from their view) */}
+                              {/* Delete Individual Message */}
                               {isMe && !isAdminMsg && (
                                 <button
                                   onClick={() => handleDeleteMessage(activeConversation._id, m._id)}
