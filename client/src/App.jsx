@@ -48,7 +48,6 @@ export default function App() {
   const [ratingComment, setRatingComment] = useState({});
   const [ratingError, setRatingError] = useState("");
 
-  // NEW: Driver Orders State
   const [driverOrders, setDriverOrders] = useState([]);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -159,7 +158,6 @@ export default function App() {
     setCart((prev) => prev.filter((item) => item.cartItemId !== cartItemId));
   };
 
-  // NEW: Update Cart Item Details (Pin Drops & Instructions)
   const handleCartDetailChange = (cartItemId, field, value) => {
     setCart((prev) =>
       prev.map((item) =>
@@ -394,7 +392,6 @@ export default function App() {
     }
   };
 
-  // NEW: Driver function to accept an order
   const handleAcceptDelivery = async (orderId) => {
     try {
       const res = await fetch(`${API_BASE}/api/driver/orders/${orderId}/accept`, {
@@ -406,6 +403,24 @@ export default function App() {
       } else {
         const data = await res.json();
         alert(data.error || "Failed to accept delivery");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // NEW: Complete Delivery Function
+  const handleCompleteDelivery = async (orderId) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/driver/orders/${orderId}/complete`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${localStorage.getItem("gogy_token")}` }
+      });
+      if (res.ok) {
+        loadDriverData();
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to complete delivery");
       }
     } catch (err) {
       console.error(err);
@@ -487,8 +502,14 @@ export default function App() {
                   <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                     <div>
                       <span className="font-black text-slate-900">{order.orderNumber}</span>
-                      <span className={`ml-3 text-[11px] font-bold px-2.5 py-1 rounded-full ${order.dispatchStatus === 'pending' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
-                        {order.dispatchStatus === 'pending' ? '⏳ Pending Dispatch' : '🚚 Active (Accepted by You)'}
+                      <span className={`ml-3 text-[11px] font-bold px-2.5 py-1 rounded-full ${
+                        order.dispatchStatus === 'pending' ? 'bg-amber-100 text-amber-800' : 
+                        order.dispatchStatus === 'active' ? 'bg-blue-100 text-blue-800' :
+                        'bg-emerald-100 text-emerald-800'
+                      }`}>
+                        {order.dispatchStatus === 'pending' ? '⏳ Pending Dispatch' : 
+                         order.dispatchStatus === 'active' ? '🚚 Active (In Transit)' :
+                         '✅ Completed'}
                       </span>
                     </div>
                     <p className="text-xs text-slate-500">Placed: {new Date(order.createdAt).toLocaleString()}</p>
@@ -528,9 +549,17 @@ export default function App() {
                   {order.dispatchStatus === 'pending' && (
                     <button 
                       onClick={() => handleAcceptDelivery(order._id)}
-                      className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-lg shadow-md transition-colors"
+                      className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-lg shadow-md transition-colors mt-2"
                     >
                       Accept Delivery Request
+                    </button>
+                  )}
+                  {order.dispatchStatus === 'active' && (
+                    <button 
+                      onClick={() => handleCompleteDelivery(order._id)}
+                      className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-md transition-colors mt-2"
+                    >
+                      ✓ Mark Delivery as Completed
                     </button>
                   )}
                 </div>
@@ -944,7 +973,6 @@ export default function App() {
                                 </div>
                               </div>
 
-                              {/* NEW: Cart Special Instructions & Pin Drop UI */}
                               {item.deliveryMethod === "delivery" && (
                                 <div className="mt-2 bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-3">
                                   <div className="flex items-center gap-2">
@@ -1189,11 +1217,18 @@ export default function App() {
                               {new Date(order.createdAt).toLocaleString()}
                             </p>
                           </div>
-                          <div className="text-right">
-                            <p className="text-xs font-bold uppercase text-slate-400">Total Paid</p>
-                            <p className="text-lg font-black text-emerald-700">
-                              ${Number(order.grandTotal).toLocaleString()} GYD
-                            </p>
+                          <div className="text-right flex flex-col items-end gap-2">
+                            <div>
+                              <p className="text-xs font-bold uppercase text-slate-400">Total Paid</p>
+                              <p className="text-lg font-black text-emerald-700">
+                                ${Number(order.grandTotal).toLocaleString()} GYD
+                              </p>
+                            </div>
+                            {order.dispatchStatus === "completed" && (
+                               <span className="bg-blue-100 text-blue-800 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded shadow-sm">
+                                 🚚 Delivery Completed
+                               </span>
+                            )}
                           </div>
                         </div>
 
@@ -1201,7 +1236,7 @@ export default function App() {
                           {order.items.map((item, idx) => {
                             const targetUserId = item.sellerId;
                             const targetUserName = item.sellerName;
-                            const raterRole = "buyer"; // Strictly one-way now
+                            const raterRole = "buyer"; 
 
                             const existingRating = allRatings.find(
                               (r) =>
@@ -1346,7 +1381,6 @@ export default function App() {
                             {conv.listingTitle}
                           </p>
                         </div>
-                        {/* Delete Conversation Button */}
                         <button
                           onClick={(e) => handleDeleteConversation(e, conv._id)}
                           className="ml-2 text-slate-300 hover:text-red-500 transition-colors"
@@ -1375,7 +1409,6 @@ export default function App() {
                             }`}
                           >
                             <div className="flex items-center gap-2">
-                              {/* Delete Individual Message */}
                               {isMe && !isAdminMsg && (
                                 <button
                                   onClick={() => handleDeleteMessage(activeConversation._id, m._id)}
