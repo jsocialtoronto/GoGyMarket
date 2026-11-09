@@ -7,20 +7,23 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
   const isFullAdmin = currentUser?.role === "admin";
   const token = localStorage.getItem("gogy_token");
 
-  const [activeSubTab, setActiveSubTab] = useState("transactions"); // "transactions" | "users"
+  const [activeSubTab, setActiveSubTab] = useState("transactions"); // "transactions" | "analytics" | "users"
   const [orders, setOrders] = useState([]);
   const [users, setUsers] = useState([]);
+  const [stats, setStats] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
   const [previewPhoto, setPreviewPhoto] = useState(null);
 
-  // Create Staff Account State
-  const [staffRole, setStaffRole] = useState("viewer");
-  const [staffName, setStaffName] = useState("");
-  const [staffContact, setStaffContact] = useState("");
-  const [staffLocation, setStaffLocation] = useState("Toronto, ON");
-  const [staffPassword, setStaffPassword] = useState("");
-  const [staffConfirmPassword, setStaffConfirmPassword] = useState("");
+  // Create Account State (Admin, Viewer, or Regular Buyer/Seller User)
+  const [newRole, setNewRole] = useState("user"); // "user" | "admin" | "viewer"
+  const [newAccountType, setNewAccountType] = useState("personal"); // "personal" | "business"
+  const [newName, setNewName] = useState("");
+  const [newContact, setNewContact] = useState("");
+  const [newAddress, setNewAddress] = useState("");
+  const [newCity, setNewCity] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newConfirmPassword, setNewConfirmPassword] = useState("");
 
   // Password Reset Modal State
   const [resetTargetUser, setResetTargetUser] = useState(null);
@@ -33,13 +36,15 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
     try {
       setIsLoading(true);
       const headers = { Authorization: `Bearer ${token}` };
-      const [ordersRes, usersRes] = await Promise.all([
+      const [ordersRes, usersRes, statsRes] = await Promise.all([
         fetch(`${API_BASE}/api/admin/orders`, { headers }),
-        fetch(`${API_BASE}/api/admin/users`, { headers })
+        fetch(`${API_BASE}/api/admin/users`, { headers }),
+        fetch(`${API_BASE}/api/admin/stats`, { headers })
       ]);
 
       if (ordersRes.ok) setOrders(await ordersRes.json());
       if (usersRes.ok) setUsers(await usersRes.json());
+      if (statsRes.ok) setStats(await statsRes.json());
     } catch (err) {
       console.error("Failed to load admin data:", err);
     } finally {
@@ -51,7 +56,7 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
     fetchAdminData();
   }, []);
 
-  // Same strict password validation rules as user registration
+  // Strict password validation rules matching registration
   const validatePasswordRules = (pw, confirmPw) => {
     if (pw.length < 10) return "Password must be at least 10 characters long.";
     if (!/[A-Z]/.test(pw)) return "Password must contain at least one capital letter.";
@@ -78,6 +83,7 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
         type: "success",
         text: `Order ${data.orderNumber} verified and set to ACTIVE! Seller has been notified for pickup.`
       });
+      fetchAdminData();
       if (onOrdersUpdated) onOrdersUpdated();
     } catch (err) {
       setFeedback({ type: "error", text: err.message });
@@ -100,24 +106,30 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
         type: "success",
         text: `Order ${data.orderNumber} has been cancelled and stock restored.`
       });
+      fetchAdminData();
       if (onOrdersUpdated) onOrdersUpdated();
     } catch (err) {
       setFeedback({ type: "error", text: err.message });
     }
   };
 
-  const handleCreateStaff = async (e) => {
+  const handleCreateAccount = async (e) => {
     e.preventDefault();
     if (!isFullAdmin) return;
     setFeedback({ type: "", text: "" });
 
-    if (!staffName.trim()) {
+    if (!newName.trim()) {
       setFeedback({ type: "error", text: "Name is required." });
       return;
     }
 
-    const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(staffContact);
-    const isValidPhone = /^\+?[\d\s-]{10,}$/.test(staffContact);
+    if (!newAddress.trim() || !newCity.trim()) {
+      setFeedback({ type: "error", text: "Both Address and City/Town are required." });
+      return;
+    }
+
+    const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newContact);
+    const isValidPhone = /^\+?[\d\s-]{10,}$/.test(newContact);
     if (!isValidEmail && !isValidPhone) {
       setFeedback({
         type: "error",
@@ -126,7 +138,7 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
       return;
     }
 
-    const pwErr = validatePasswordRules(staffPassword, staffConfirmPassword);
+    const pwErr = validatePasswordRules(newPassword, newConfirmPassword);
     if (pwErr) {
       setFeedback({ type: "error", text: pwErr });
       return;
@@ -140,25 +152,55 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
           Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({
-          name: staffName,
-          contactMethod: staffContact,
-          password: staffPassword,
-          role: staffRole,
-          location: staffLocation
+          name: newName.trim(),
+          contactMethod: newContact.trim(),
+          password: newPassword,
+          role: newRole,
+          accountType: newRole === "user" ? newAccountType : "business",
+          location: `${newAddress.trim()}, ${newCity.trim()}`
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not create account");
 
       setUsers((prev) => [data, ...prev]);
-      setStaffName("");
-      setStaffContact("");
-      setStaffPassword("");
-      setStaffConfirmPassword("");
+      setNewName("");
+      setNewContact("");
+      setNewAddress("");
+      setNewCity("");
+      setNewPassword("");
+      setNewConfirmPassword("");
       setFeedback({
         type: "success",
         text: `Created ${data.role.toUpperCase()} account for ${data.name}.`
       });
+    } catch (err) {
+      setFeedback({ type: "error", text: err.message });
+    }
+  };
+
+  const handleDeleteUser = async (userObj) => {
+    if (!isFullAdmin) return;
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently delete the account for "${userObj.name}" (${userObj.role})? Any listings posted by this user will also be removed.`
+    );
+    if (!confirmed) return;
+
+    setFeedback({ type: "", text: "" });
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/users/${userObj._id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to delete user");
+
+      setUsers((prev) => prev.filter((u) => u._id !== userObj._id));
+      setFeedback({
+        type: "success",
+        text: `Deleted account for ${userObj.name}.`
+      });
+      if (onOrdersUpdated) onOrdersUpdated();
     } catch (err) {
       setFeedback({ type: "error", text: err.message });
     }
@@ -240,7 +282,7 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
   return (
     <div className="space-y-6">
       {/* Top Admin Role Banner */}
-      <div className="bg-slate-900 text-white p-5 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+      <div className="bg-slate-900 text-white p-5 rounded-xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 shadow-sm">
         <div>
           <div className="flex items-center gap-2">
             <span className="text-xl">🛡️</span>
@@ -257,12 +299,12 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
           </div>
           <p className="text-xs text-slate-400 mt-1">
             {isFullAdmin
-              ? "You have full permissions to verify eTransfers & Cash, cancel transactions, create Admin/Viewer accounts, and reset passwords."
-              : "You are signed in as a Viewer. You can inspect all transactions and users, but cannot make changes."}
+              ? "Manage transactions, view marketplace analytics, create or delete Buyer/Seller/Admin/Viewer accounts, and reset passwords."
+              : "Read-only Viewer console. You can inspect transactions, analytics, and accounts, but cannot make changes."}
           </p>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setActiveSubTab("transactions")}
             className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${
@@ -271,7 +313,17 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
                 : "bg-slate-800 text-slate-300 hover:bg-slate-700"
             }`}
           >
-            💳 All Transactions ({orders.length})
+            💳 Transactions ({orders.length})
+          </button>
+          <button
+            onClick={() => setActiveSubTab("analytics")}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${
+              activeSubTab === "analytics"
+                ? "bg-emerald-600 text-white"
+                : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+            }`}
+          >
+            📊 Marketplace Stats
           </button>
           <button
             onClick={() => setActiveSubTab("users")}
@@ -281,7 +333,7 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
                 : "bg-slate-800 text-slate-300 hover:bg-slate-700"
             }`}
           >
-            👥 Users & Staff ({users.length})
+            👥 Manage Accounts ({users.length})
           </button>
         </div>
       </div>
@@ -301,7 +353,7 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
         </div>
       )}
 
-      {/* TAB 1: TRANSACTIONS & PAYMENT VERIFICATION */}
+      {/* SUB-TAB 1: TRANSACTIONS & PAYMENT VERIFICATION */}
       {activeSubTab === "transactions" && (
         <div className="space-y-4">
           <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3">
@@ -330,7 +382,7 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
               onClick={fetchAdminData}
               className="text-xs font-bold text-emerald-700 hover:underline"
             >
-              ↻ Refresh List
+              ↻ Refresh Data
             </button>
           </div>
 
@@ -373,7 +425,6 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
                     </div>
                   </div>
 
-                  {/* Order Items */}
                   <div className="space-y-2">
                     {order.items.map((item, idx) => (
                       <div
@@ -412,7 +463,6 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
                     ))}
                   </div>
 
-                  {/* Lockbox Photo Inspection & Admin Controls */}
                   <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                     <div className="flex items-center gap-3">
                       {order.lockboxPhoto && (
@@ -430,7 +480,6 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
                       )}
                     </div>
 
-                    {/* Action Buttons: Enabled for Admin, Disabled for Viewer */}
                     {isFullAdmin ? (
                       <div className="flex items-center gap-2">
                         {order.status === "waiting_etransfer" && (
@@ -473,47 +522,220 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
         </div>
       )}
 
-      {/* TAB 2: USER DIRECTORY, STAFF CREATION & PASSWORD RESETS */}
+      {/* SUB-TAB 2: MARKETPLACE ANALYTICS & STATS */}
+      {activeSubTab === "analytics" && (
+        <div className="space-y-6">
+          {!stats ? (
+            <div className="bg-white p-10 rounded-xl border text-center text-sm text-slate-500">
+              Calculating marketplace analytics...
+            </div>
+          ) : (
+            <>
+              {/* High-Level KPI Summary Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                  <p className="text-xs font-bold uppercase text-slate-400">
+                    Most Common Delivery Method
+                  </p>
+                  <p className="text-2xl font-black text-emerald-700 mt-1">
+                    {stats.mostCommonDelivery}
+                  </p>
+                  <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between text-xs text-slate-600 font-semibold">
+                    <span>🚶 Local Pickup: {stats.deliveryCounts?.pickup || 0} items</span>
+                    <span>🚚 Delivery: {stats.deliveryCounts?.delivery || 0} items</span>
+                  </div>
+                </div>
+
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                  <p className="text-xs font-bold uppercase text-slate-400">
+                    Most Popular Payment Type
+                  </p>
+                  <p className="text-2xl font-black text-emerald-700 mt-1">
+                    {stats.mostPopularPayment}
+                  </p>
+                  <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between text-xs text-slate-600 font-semibold">
+                    <span>💵 Cash: {stats.paymentCounts?.cash || 0}</span>
+                    <span>🏦 eTransfer: {stats.paymentCounts?.etransfer || 0}</span>
+                    <span>💳 Credit: {stats.paymentCounts?.credit || 0}</span>
+                  </div>
+                </div>
+
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                  <p className="text-xs font-bold uppercase text-slate-400">
+                    Platform Activity Overview
+                  </p>
+                  <p className="text-2xl font-black text-slate-900 mt-1">
+                    {stats.totalListings} Listings Posted
+                  </p>
+                  <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between text-xs text-slate-600 font-semibold">
+                    <span>🧾 Active Orders: {stats.totalOrders}</span>
+                    <span>⭐ User Reviews: {stats.totalRatings}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Detailed Popular Items & Categories Breakdown */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                  <h3 className="font-bold text-base text-slate-900 border-b pb-2">
+                    🔥 Most Popular Items Posted
+                  </h3>
+                  {stats.topPostedItems?.length === 0 ? (
+                    <p className="text-xs text-slate-400">No items have been posted yet.</p>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {stats.topPostedItems.map((item, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between bg-slate-50 px-3.5 py-2.5 rounded-lg border border-slate-200 text-sm"
+                        >
+                          <span className="font-bold text-slate-800">
+                            #{idx + 1} {item.name}
+                          </span>
+                          <span className="bg-emerald-100 text-emerald-800 text-xs font-black px-2.5 py-0.5 rounded-full">
+                            {item.count} posted
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                  <h3 className="font-bold text-base text-slate-900 border-b pb-2">
+                    📂 Most Popular Categories Posted
+                  </h3>
+                  {stats.topCategories?.length === 0 ? (
+                    <p className="text-xs text-slate-400">No categories posted yet.</p>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {stats.topCategories.map((cat, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between bg-slate-50 px-3.5 py-2.5 rounded-lg border border-slate-200 text-sm"
+                        >
+                          <span className="font-bold text-slate-800">
+                            #{idx + 1} {cat.name}
+                          </span>
+                          <span className="bg-slate-200 text-slate-800 text-xs font-black px-2.5 py-0.5 rounded-full">
+                            {cat.count} listings
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* SUB-TAB 3: MANAGE ACCOUNTS (CREATE/DELETE BUYER, SELLER, ADMIN, VIEWER) */}
       {activeSubTab === "users" && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column: Create Admin / Viewer Form */}
+          {/* Left Column: Create Account Form */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 h-fit space-y-4">
             <h3 className="font-bold text-base text-slate-900 border-b pb-2">
-              Create Admin or Viewer Account
+              Create User, Admin, or Viewer
             </h3>
 
             {!isFullAdmin ? (
               <div className="bg-slate-50 p-4 rounded-lg border text-xs text-slate-500">
-                🔒 Only full Administrators can create new Admin or Viewer accounts.
+                🔒 Only full Administrators can create or delete accounts.
               </div>
             ) : (
-              <form onSubmit={handleCreateStaff} className="space-y-3">
+              <form onSubmit={handleCreateAccount} className="space-y-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
                     Account Role *
                   </label>
                   <select
-                    value={staffRole}
-                    onChange={(e) => setStaffRole(e.target.value)}
+                    value={newRole}
+                    onChange={(e) => setNewRole(e.target.value)}
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold bg-white"
                   >
+                    <option value="user">🛒 Regular User (Buyer & Seller)</option>
                     <option value="admin">🛡️ Full Administrator (Can do anything)</option>
                     <option value="viewer">👁️ Viewer (Read-only, no changes)</option>
                   </select>
                 </div>
 
+                {newRole === "user" && (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                      Buyer/Seller Profile Type *
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setNewAccountType("personal")}
+                        className={`py-1.5 rounded-lg border text-xs font-bold ${
+                          newAccountType === "personal"
+                            ? "bg-emerald-50 border-emerald-500 text-emerald-700"
+                            : "bg-white border-slate-300 text-slate-600"
+                        }`}
+                      >
+                        👤 Personal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNewAccountType("business")}
+                        className={`py-1.5 rounded-lg border text-xs font-bold ${
+                          newAccountType === "business"
+                            ? "bg-emerald-50 border-emerald-500 text-emerald-700"
+                            : "bg-white border-slate-300 text-slate-600"
+                        }`}
+                      >
+                        🏢 Business
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                    Full Name *
+                    {newRole === "user" && newAccountType === "business"
+                      ? "Business Name *"
+                      : "Full Name *"}
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Alex Manager"
-                    value={staffName}
-                    onChange={(e) => setStaffName(e.target.value)}
+                    placeholder="e.g. Jane Doe or Jane's Bakery"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
                   />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                      Address *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="15 Eastdale Ave"
+                      value={newAddress}
+                      onChange={(e) => setNewAddress(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                      City / Town *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Toronto"
+                      value={newCity}
+                      onChange={(e) => setNewCity(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                  </div>
                 </div>
 
                 <div>
@@ -523,9 +745,9 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
                   <input
                     type="text"
                     required
-                    placeholder="staff@gogymarket.com or 416-555-0199"
-                    value={staffContact}
-                    onChange={(e) => setStaffContact(e.target.value)}
+                    placeholder="user@email.com or 416-555-0199"
+                    value={newContact}
+                    onChange={(e) => setNewContact(e.target.value)}
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
                   />
                 </div>
@@ -538,8 +760,8 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
                     type="password"
                     required
                     placeholder="Min 10 chars, 1 capital, letters & numbers"
-                    value={staffPassword}
-                    onChange={(e) => setStaffPassword(e.target.value)}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
                   />
                 </div>
@@ -552,8 +774,8 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
                     type="password"
                     required
                     placeholder="Re-type password"
-                    value={staffConfirmPassword}
-                    onChange={(e) => setStaffConfirmPassword(e.target.value)}
+                    value={newConfirmPassword}
+                    onChange={(e) => setNewConfirmPassword(e.target.value)}
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
                   />
                 </div>
@@ -562,58 +784,82 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
                   type="submit"
                   className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm py-2.5 rounded-lg shadow-sm"
                 >
-                  + Create {staffRole === "admin" ? "Admin" : "Viewer"} Account
+                  + Create{" "}
+                  {newRole === "admin"
+                    ? "Admin"
+                    : newRole === "viewer"
+                    ? "Viewer"
+                    : "Buyer/Seller"}{" "}
+                  Account
                 </button>
               </form>
             )}
           </div>
 
-          {/* Right Column: User Directory & Password Reset */}
+          {/* Right Column: User Directory, Password Reset & Account Deletion */}
           <div className="lg:col-span-2 bg-white p-5 rounded-xl border border-slate-200 space-y-4">
             <h3 className="font-bold text-base text-slate-900 border-b pb-2">
-              Registered Users & Staff Directory
+              All Registered Accounts ({users.length})
             </h3>
 
             <div className="space-y-2.5">
-              {users.map((u) => (
-                <div
-                  key={u._id}
-                  className="p-3.5 rounded-lg border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
-                >
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-900 text-sm">{u.name}</span>
-                      <span
-                        className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
-                          u.role === "admin"
-                            ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
-                            : u.role === "viewer"
-                            ? "bg-amber-100 text-amber-800 border border-amber-300"
-                            : "bg-slate-100 text-slate-600"
-                        }`}
-                      >
-                        {u.role || "user"}
-                      </span>
+              {users.map((u) => {
+                const isSelf = String(u._id) === String(currentUser.id);
+                return (
+                  <div
+                    key={u._id}
+                    className="p-3.5 rounded-lg border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+                  >
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-slate-900 text-sm">{u.name}</span>
+                        <span
+                          className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                            u.role === "admin"
+                              ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                              : u.role === "viewer"
+                              ? "bg-amber-100 text-amber-800 border border-amber-300"
+                              : "bg-slate-100 text-slate-700 border border-slate-300"
+                          }`}
+                        >
+                          {u.role === "user" ? `buyer/seller (${u.accountType || "personal"})` : u.role}
+                        </span>
+                        {u.ratingCount > 0 && (
+                          <span className="bg-yellow-50 text-yellow-800 border border-yellow-300 text-[11px] font-bold px-2 py-0.5 rounded-full">
+                            ⭐ {u.averageRating} ({u.ratingCount})
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {u.email || u.phone} • 📍 {u.location}
+                      </p>
                     </div>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {u.email || u.phone} • 📍 {u.location}
-                    </p>
-                  </div>
 
-                  {isFullAdmin && (
-                    <button
-                      onClick={() => {
-                        setResetTargetUser(u);
-                        setResetPassword("");
-                        setResetConfirmPassword("");
-                      }}
-                      className="text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg"
-                    >
-                      🔑 Reset Password
-                    </button>
-                  )}
-                </div>
-              ))}
+                    {isFullAdmin && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setResetTargetUser(u);
+                            setResetPassword("");
+                            setResetConfirmPassword("");
+                          }}
+                          className="text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg"
+                        >
+                          🔑 Reset Password
+                        </button>
+                        {!isSelf && (
+                          <button
+                            onClick={() => handleDeleteUser(u)}
+                            className="text-xs font-bold bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-3 py-1.5 rounded-lg"
+                          >
+                            🗑️ Delete
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
