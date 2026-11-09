@@ -53,6 +53,9 @@ const listingSchema = new mongoose.Schema(
   {
     sellerId: { type: String, required: true, index: true },
     sellerName: { type: String, required: true },
+    // NEW: Attach rating to listings for immediate frontend rendering
+    sellerRating: { type: Number, default: 0 },
+    sellerRatingCount: { type: Number, default: 0 },
     title: { type: String, required: true, trim: true },
     category: { type: String, required: true, index: true },
     subcategory: { type: String, required: true, index: true },
@@ -149,6 +152,7 @@ const orderSchema = new mongoose.Schema(
 
 const Order = mongoose.model("Order", orderSchema);
 
+// UPDATE: One-Way Rating Schema (Buyer -> Seller)
 const ratingSchema = new mongoose.Schema(
   {
     orderId: { type: String, required: true, index: true },
@@ -157,7 +161,6 @@ const ratingSchema = new mongoose.Schema(
     listingTitle: { type: String, required: true },
     raterId: { type: String, required: true, index: true },
     raterName: { type: String, required: true },
-    raterRole: { type: String, enum: ["buyer", "seller"], required: true },
     targetUserId: { type: String, required: true, index: true },
     targetUserName: { type: String, required: true },
     stars: { type: Number, required: true, min: 1, max: 5 },
@@ -173,13 +176,6 @@ const Rating = mongoose.model("Rating", ratingSchema);
 // ==========================================
 async function initializeDatabase() {
   try {
-    await Listing.deleteMany({
-      $or: [
-        { sellerId: { $in: ["usr_1", "usr_2", "usr_3"] } },
-        { sellerName: { $in: ["Sarah K.", "Errol D.", "Marcus T."] } }
-      ]
-    });
-
     const masterEmail = "admin@gogymarket.com";
     const existingAdmin = await User.findOne({ email: masterEmail });
     if (!existingAdmin) {
@@ -250,22 +246,16 @@ async function sendOrderNotification({ listingId, listingTitle, buyerName, selle
 // 3. API ROUTES
 // ==========================================
 
-app.get("/", (req, res) => {
-  res.send("GoGyMarket API is live. Visit /api/health for status.");
-});
+app.get("/", (req, res) => res.send("GoGyMarket API is live."));
 
 app.get("/api/health", (req, res) => {
-  res.json({
-    status: "ok",
-    service: "GoGyMarket API is running",
-    dbConnected: mongoose.connection.readyState === 1
-  });
+  res.json({ status: "ok", dbConnected: mongoose.connection.readyState === 1 });
 });
 
+// AUTH ROUTES
 app.post("/api/auth/register", async (req, res) => {
   try {
     const { accountType, firstName, lastName, businessName, contactMethod, password, location } = req.body;
-
     const pwError = validateStrictPassword(password);
     if (pwError) return res.status(400).json({ error: pwError });
 
@@ -301,12 +291,7 @@ app.post("/api/auth/register", async (req, res) => {
     res.status(201).json({
       token,
       user: {
-        id: newUser._id,
-        name: newUser.name,
-        email: newUser.email,
-        phone: newUser.phone,
-        location: newUser.location,
-        role: newUser.role
+        id: newUser._id, name: newUser.name, email: newUser.email, phone: newUser.phone, location: newUser.location, role: newUser.role
       }
     });
   } catch (err) {
@@ -318,12 +303,10 @@ app.post("/api/auth/login", async (req, res) => {
   try {
     const { contactMethod, password } = req.body;
     const isEmail = contactMethod.includes("@");
-
     const query = isEmail ? { email: contactMethod.toLowerCase().trim() } : { phone: contactMethod.trim() };
     const user = await User.findOne(query);
 
     if (!user) return res.status(400).json({ error: "Invalid login credentials." });
-
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ error: "Invalid login credentials." });
 
@@ -332,12 +315,7 @@ app.post("/api/auth/login", async (req, res) => {
     res.json({
       token,
       user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        location: user.location,
-        role: user.role || "user"
+        id: user._id, name: user.name, email: user.email, phone: user.phone, location: user.location, role: user.role || "user"
       }
     });
   } catch (err) {
@@ -352,32 +330,15 @@ app.post("/api/auth/login", async (req, res) => {
 app.post("/api/orders", async (req, res) => {
   try {
     const {
-      buyerId,
-      buyerName,
-      buyerContact,
-      paymentMethod,
-      paymentOptionLabel,
-      items,
-      itemSubtotal,
-      deliveryTotal,
-      grandTotal,
-      lockboxPhoto
+      buyerId, buyerName, buyerContact, paymentMethod, paymentOptionLabel, items, itemSubtotal, deliveryTotal, grandTotal, lockboxPhoto
     } = req.body;
 
-    if (!items || items.length === 0) {
-      return res.status(400).json({ error: "Cart cannot be empty." });
-    }
+    if (!items || items.length === 0) return res.status(400).json({ error: "Cart cannot be empty." });
 
     let initialStatus = "active";
-    if (paymentMethod === "etransfer") {
-      initialStatus = "waiting_etransfer";
-    } else if (paymentMethod === "cash") {
-      initialStatus = "waiting_cash";
-    } else if (paymentMethod === "pickup") {
-      initialStatus = "pickup_pending";
-    } else if (paymentMethod === "credit") {
-      initialStatus = "active";
-    }
+    if (paymentMethod === "etransfer") initialStatus = "waiting_etransfer";
+    else if (paymentMethod === "cash") initialStatus = "waiting_cash";
+    else if (paymentMethod === "pickup") initialStatus = "pickup_pending";
 
     const orderNumber = "ORD-" + Math.floor(100000 + Math.random() * 900000);
 
@@ -409,28 +370,17 @@ app.post("/api/orders", async (req, res) => {
     }));
 
     const newOrder = await Order.create({
-      orderNumber,
-      buyerId,
-      buyerName,
-      buyerContact,
-      paymentMethod,
-      paymentOptionLabel,
-      status: initialStatus,
-      items: formattedItems,
-      itemSubtotal: Number(itemSubtotal || 0),
-      deliveryTotal: Number(deliveryTotal || 0),
-      grandTotal: Number(grandTotal || 0),
-      lockboxPhoto: lockboxPhoto || null
+      orderNumber, buyerId, buyerName, buyerContact, paymentMethod, paymentOptionLabel, status: initialStatus,
+      items: formattedItems, itemSubtotal: Number(itemSubtotal || 0), deliveryTotal: Number(deliveryTotal || 0), grandTotal: Number(grandTotal || 0), lockboxPhoto: lockboxPhoto || null
     });
 
     for (const item of formattedItems) {
       const itemTotal = item.unitPrice * item.quantity;
       let msg = "";
-
       if (paymentMethod === "pickup") {
         msg = `🧾 ORDER ${orderNumber} (Option 1: Local Pickup)\nItem: ${item.quantity}x ${item.title}\nItem Total: $${itemTotal.toLocaleString()} GYD\n\nBuyer ${buyerName} selected Local Pickup. Please coordinate pickup time and payment directly in this chat.`;
       } else if (paymentMethod === "credit") {
-        msg = `✅ ORDER ${orderNumber} ACTIVE & PAID (Credit Card)\nItem: ${item.quantity}x ${item.title}\nItem Total: $${itemTotal.toLocaleString()} GYD\nDelivery Fee: $${item.shippingCost.toLocaleString()} GYD\nDeliver To: ${item.buyerAddress}\n\nPayment is complete! Seller ${item.sellerName}, please prepare this item for delivery pickup. Both buyer and seller can now leave a rating!`;
+        msg = `✅ ORDER ${orderNumber} ACTIVE & PAID (Credit Card)\nItem: ${item.quantity}x ${item.title}\nItem Total: $${itemTotal.toLocaleString()} GYD\nDelivery Fee: $${item.shippingCost.toLocaleString()} GYD\nDeliver To: ${item.buyerAddress}\n\nPayment is complete! Seller ${item.sellerName}, please prepare this item for delivery pickup.`;
       } else if (paymentMethod === "etransfer") {
         msg = `⏳ ORDER ${orderNumber} PENDING ADMIN VERIFICATION (eTransfer to gogymarket.com)\nItem: ${item.quantity}x ${item.title}\nTotal Due: $${(itemTotal + item.shippingCost).toLocaleString()} GYD\n\nOnce GoGyMarket Admin verifies the eTransfer, the seller will be notified that the item is ready for pickup.`;
       } else if (paymentMethod === "cash") {
@@ -438,11 +388,7 @@ app.post("/api/orders", async (req, res) => {
       }
 
       await sendOrderNotification({
-        listingId: item.listingId,
-        listingTitle: item.title,
-        buyerName,
-        sellerName: item.sellerName,
-        text: msg
+        listingId: item.listingId, listingTitle: item.title, buyerName, sellerName: item.sellerName, text: msg
       });
     }
 
@@ -473,72 +419,47 @@ app.get("/api/ratings", async (req, res) => {
   }
 });
 
+// UPDATE: Strictly One-Way Rating (Buyer Rates Seller)
 app.post("/api/ratings", async (req, res) => {
   try {
-    const {
-      orderId,
-      listingId,
-      raterId,
-      raterName,
-      raterRole,
-      targetUserId,
-      targetUserName,
-      stars,
-      comment
-    } = req.body;
+    const { orderId, listingId, raterId, raterName, targetUserId, targetUserName, stars, comment } = req.body;
 
-    if (!stars || stars < 1 || stars > 5) {
-      return res.status(400).json({ error: "Please select a star rating between 1 and 5." });
-    }
-    if (!comment || !comment.trim()) {
-      return res.status(400).json({ error: "Please write a comment for your review." });
-    }
+    if (!stars || stars < 1 || stars > 5) return res.status(400).json({ error: "Please select a star rating between 1 and 5." });
+    if (!comment || !comment.trim()) return res.status(400).json({ error: "Please write a comment for your review." });
 
     const order = await Order.findById(orderId);
-    if (!order) {
-      return res.status(404).json({ error: "Order not found." });
-    }
+    if (!order) return res.status(404).json({ error: "Order not found." });
 
     if (order.status !== "active") {
-      return res.status(400).json({
-        error: "Ratings can only be submitted after payment has been confirmed and the transaction is Active."
-      });
+      return res.status(400).json({ error: "Ratings can only be submitted after payment has been verified." });
     }
 
-    const existingRating = await Rating.findOne({
-      orderId,
-      listingId,
-      raterId,
-      targetUserId
-    });
-    if (existingRating) {
-      return res.status(400).json({ error: "You have already rated this user for this transaction." });
+    if (String(order.buyerId) !== String(raterId)) {
+      return res.status(400).json({ error: "Only the Buyer can leave a rating for this transaction." });
     }
+
+    const existingRating = await Rating.findOne({ orderId, listingId, raterId });
+    if (existingRating) return res.status(400).json({ error: "You have already rated the seller for this item." });
 
     const matchedItem = order.items.find((i) => String(i.listingId) === String(listingId)) || order.items[0];
 
     const newRating = await Rating.create({
-      orderId,
-      orderNumber: order.orderNumber,
-      listingId,
-      listingTitle: matchedItem ? matchedItem.title : "Marketplace Item",
-      raterId,
-      raterName,
-      raterRole,
-      targetUserId,
-      targetUserName,
-      stars: Number(stars),
-      comment: comment.trim()
+      orderId, orderNumber: order.orderNumber, listingId, listingTitle: matchedItem ? matchedItem.title : "Marketplace Item",
+      raterId, raterName, targetUserId, targetUserName, stars: Number(stars), comment: comment.trim()
     });
 
     const allTargetRatings = await Rating.find({ targetUserId });
     const totalStars = allTargetRatings.reduce((sum, r) => sum + r.stars, 0);
     const avg = Number((totalStars / allTargetRatings.length).toFixed(1));
 
-    await User.findByIdAndUpdate(targetUserId, {
-      averageRating: avg,
-      ratingCount: allTargetRatings.length
-    });
+    // Update Seller's Global Score
+    await User.findByIdAndUpdate(targetUserId, { averageRating: avg, ratingCount: allTargetRatings.length });
+    
+    // NEW: Update all of the Seller's active listings so the rating shows up in Search results
+    await Listing.updateMany(
+      { sellerId: targetUserId },
+      { sellerRating: avg, sellerRatingCount: allTargetRatings.length }
+    );
 
     res.status(201).json(newRating);
   } catch (err) {
@@ -567,60 +488,31 @@ app.get("/api/admin/stats", verifyStaff, async (req, res) => {
       subcategoryCounts[subKey] = (subcategoryCounts[subKey] || 0) + 1;
     });
 
-    const topPostedItems = Object.entries(itemTitleCounts)
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5);
-
-    const topCategories = Object.entries(subcategoryCounts)
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5);
+    const topPostedItems = Object.entries(itemTitleCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 5);
+    const topCategories = Object.entries(subcategoryCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 5);
 
     const deliveryCounts = { pickup: 0, delivery: 0 };
     orders.forEach((o) => {
       o.items.forEach((item) => {
-        if (item.deliveryMethod === "delivery") {
-          deliveryCounts.delivery += Number(item.quantity || 1);
-        } else {
-          deliveryCounts.pickup += Number(item.quantity || 1);
-        }
+        if (item.deliveryMethod === "delivery") deliveryCounts.delivery += Number(item.quantity || 1);
+        else deliveryCounts.pickup += Number(item.quantity || 1);
       });
     });
 
-    const mostCommonDelivery =
-      deliveryCounts.delivery > deliveryCounts.pickup
-        ? "Delivery"
-        : deliveryCounts.pickup > deliveryCounts.delivery
-        ? "Local Pickup"
-        : "Tied (Pickup & Delivery)";
+    const mostCommonDelivery = deliveryCounts.delivery > deliveryCounts.pickup ? "Delivery" : deliveryCounts.pickup > deliveryCounts.delivery ? "Local Pickup" : "Tied (Pickup & Delivery)";
 
     const paymentCounts = { cash: 0, etransfer: 0, credit: 0 };
     orders.forEach((o) => {
-      if (paymentCounts[o.paymentMethod] != null) {
-        paymentCounts[o.paymentMethod] += 1;
-      }
+      if (paymentCounts[o.paymentMethod] != null) paymentCounts[o.paymentMethod] += 1;
     });
 
     const sortedPayments = Object.entries(paymentCounts).sort((a, b) => b[1] - a[1]);
-    const paymentLabels = {
-      cash: "Cash in Lockbox",
-      etransfer: "eTransfer",
-      credit: "Credit Card"
-    };
-    const mostPopularPayment =
-      sortedPayments[0][1] > 0 ? paymentLabels[sortedPayments[0][0]] : "No Delivery Payments Yet";
+    const paymentLabels = { cash: "Cash in Lockbox", etransfer: "eTransfer", credit: "Credit Card" };
+    const mostPopularPayment = sortedPayments[0][1] > 0 ? paymentLabels[sortedPayments[0][0]] : "No Delivery Payments Yet";
 
     res.json({
-      totalListings: listings.length,
-      totalOrders: orders.length,
-      totalRatings: ratings.length,
-      topPostedItems,
-      topCategories,
-      deliveryCounts,
-      mostCommonDelivery,
-      paymentCounts,
-      mostPopularPayment
+      totalListings: listings.length, totalOrders: orders.length, totalRatings: ratings.length,
+      topPostedItems, topCategories, deliveryCounts, mostCommonDelivery, paymentCounts, mostPopularPayment
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -640,10 +532,7 @@ app.patch("/api/admin/orders/:id/verify", verifyStaff, requireFullAdmin, async (
   try {
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ error: "Order not found." });
-
-    if (order.status !== "waiting_etransfer" && order.status !== "waiting_cash") {
-      return res.status(400).json({ error: "Only pending eTransfer or Cash orders require manual verification." });
-    }
+    if (order.status !== "waiting_etransfer" && order.status !== "waiting_cash") return res.status(400).json({ error: "Only pending eTransfer or Cash orders require manual verification." });
 
     const previousType = order.status === "waiting_etransfer" ? "eTransfer" : "Cash Lockbox";
     order.status = "active";
@@ -653,14 +542,10 @@ app.patch("/api/admin/orders/:id/verify", verifyStaff, requireFullAdmin, async (
 
     for (const item of order.items) {
       await sendOrderNotification({
-        listingId: item.listingId,
-        listingTitle: item.title,
-        buyerName: order.buyerName,
-        sellerName: item.sellerName,
-        text: `✅ PAYMENT VERIFIED BY ADMIN (${previousType})\nOrder: ${order.orderNumber}\nItem: ${item.quantity}x ${item.title}\nDeliver To: ${item.buyerAddress}\n\n🔔 Notification to Seller (${item.sellerName}): Payment has been verified by GoGyMarket Admin. Your item is now ACTIVE and ready for delivery pickup! Both Buyer and Seller can now rate this transaction.`
+        listingId: item.listingId, listingTitle: item.title, buyerName: order.buyerName, sellerName: item.sellerName,
+        text: `✅ PAYMENT VERIFIED BY ADMIN (${previousType})\nOrder: ${order.orderNumber}\nItem: ${item.quantity}x ${item.title}\nDeliver To: ${item.buyerAddress}\n\n🔔 Notification to Seller (${item.sellerName}): Payment has been verified by GoGyMarket Admin. Your item is now ACTIVE and ready for delivery pickup! The Buyer can now rate this transaction.`
       });
     }
-
     res.json(order);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -671,27 +556,19 @@ app.patch("/api/admin/orders/:id/cancel", verifyStaff, requireFullAdmin, async (
   try {
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ error: "Order not found." });
-    if (order.status === "cancelled") {
-      return res.status(400).json({ error: "Order is already cancelled." });
-    }
+    if (order.status === "cancelled") return res.status(400).json({ error: "Order is already cancelled." });
 
     for (const item of order.items) {
       if (item.deliveryMethod === "delivery") {
         const listing = await Listing.findById(item.listingId);
         if (listing) {
           listing.stockCount = (listing.stockCount || 0) + Number(item.quantity || 1);
-          if (listing.stockCount > 0 && listing.status === "sold") {
-            listing.status = "active";
-          }
+          if (listing.stockCount > 0 && listing.status === "sold") listing.status = "active";
           await listing.save();
         }
       }
-
       await sendOrderNotification({
-        listingId: item.listingId,
-        listingTitle: item.title,
-        buyerName: order.buyerName,
-        sellerName: item.sellerName,
+        listingId: item.listingId, listingTitle: item.title, buyerName: order.buyerName, sellerName: item.sellerName,
         text: `❌ ORDER CANCELLED BY ADMIN\nOrder: ${order.orderNumber}\nItem: ${item.quantity}x ${item.title}\n\nThis transaction has been cancelled by GoGyMarket Administration and any reserved stock has been returned to the listing.`
       });
     }
@@ -700,7 +577,6 @@ app.patch("/api/admin/orders/:id/cancel", verifyStaff, requireFullAdmin, async (
     order.verifiedBy = req.staffUser.name;
     order.verifiedAt = new Date();
     await order.save();
-
     res.json(order);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -719,18 +595,12 @@ app.get("/api/admin/users", verifyStaff, async (req, res) => {
 app.post("/api/admin/users", verifyStaff, requireFullAdmin, async (req, res) => {
   try {
     const { name, contactMethod, password, role, accountType, location } = req.body;
-
-    if (!["user", "admin", "viewer"].includes(role)) {
-      return res.status(400).json({ error: "Role must be 'user', 'admin', or 'viewer'." });
-    }
-
+    if (!["user", "admin", "viewer"].includes(role)) return res.status(400).json({ error: "Role must be 'user', 'admin', or 'viewer'." });
     const pwError = validateStrictPassword(password);
     if (pwError) return res.status(400).json({ error: pwError });
-
     const isEmail = contactMethod.includes("@");
     const email = isEmail ? contactMethod.toLowerCase().trim() : undefined;
     const phone = !isEmail ? contactMethod.trim() : undefined;
-
     if (email) {
       const exists = await User.findOne({ email });
       if (exists) return res.status(400).json({ error: "Email is already in use." });
@@ -739,32 +609,13 @@ app.post("/api/admin/users", verifyStaff, requireFullAdmin, async (req, res) => 
       const exists = await User.findOne({ phone });
       if (exists) return res.status(400).json({ error: "Phone number is already in use." });
     }
-
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
-
     const newAccount = await User.create({
       accountType: accountType || (role === "user" ? "personal" : "business"),
-      role,
-      name: name.trim(),
-      email,
-      phone,
-      password: hashedPassword,
-      location: location || "Toronto, ON"
+      role, name: name.trim(), email, phone, password: hashedPassword, location: location || "Toronto, ON"
     });
-
-    res.status(201).json({
-      _id: newAccount._id,
-      name: newAccount.name,
-      email: newAccount.email,
-      phone: newAccount.phone,
-      role: newAccount.role,
-      accountType: newAccount.accountType,
-      location: newAccount.location,
-      averageRating: newAccount.averageRating,
-      ratingCount: newAccount.ratingCount,
-      createdAt: newAccount.createdAt
-    });
+    res.status(201).json(newAccount);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -772,15 +623,10 @@ app.post("/api/admin/users", verifyStaff, requireFullAdmin, async (req, res) => 
 
 app.delete("/api/admin/users/:id", verifyStaff, requireFullAdmin, async (req, res) => {
   try {
-    if (String(req.staffUser._id) === String(req.params.id)) {
-      return res.status(400).json({ error: "You cannot delete your own active Admin account." });
-    }
-
+    if (String(req.staffUser._id) === String(req.params.id)) return res.status(400).json({ error: "You cannot delete your own active Admin account." });
     const deletedUser = await User.findByIdAndDelete(req.params.id);
     if (!deletedUser) return res.status(404).json({ error: "User not found." });
-
     await Listing.deleteMany({ sellerId: String(req.params.id) });
-
     res.json({ deleted: true, id: req.params.id, name: deletedUser.name });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -792,18 +638,10 @@ app.patch("/api/admin/users/:id/reset-password", verifyStaff, requireFullAdmin, 
     const { newPassword } = req.body;
     const pwError = validateStrictPassword(newPassword);
     if (pwError) return res.status(400).json({ error: pwError });
-
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
-
-    const updatedUser = await User.findByIdAndUpdate(
-      req.params.id,
-      { password: hashedPassword },
-      { new: true }
-    ).select("-password");
-
+    const updatedUser = await User.findByIdAndUpdate(req.params.id, { password: hashedPassword }, { new: true }).select("-password");
     if (!updatedUser) return res.status(404).json({ error: "User not found." });
-
     res.json({ message: `Password successfully reset for ${updatedUser.name}.` });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -816,6 +654,8 @@ app.patch("/api/admin/users/:id/reset-password", verifyStaff, requireFullAdmin, 
 
 app.get("/api/listings", async (req, res) => {
   try {
+    // When a seller logs in, we might want to ensure we fetch their latest rating for new posts.
+    // For now, sorting by newest first.
     const listings = await Listing.find().sort({ createdAt: -1 });
     res.json(listings);
   } catch (err) {
@@ -826,10 +666,16 @@ app.get("/api/listings", async (req, res) => {
 app.post("/api/listings", async (req, res) => {
   try {
     const stock = req.body.stockCount != null ? Number(req.body.stockCount) : 1;
+    
+    // When a new listing is created, grab the seller's current average rating from the User profile
+    const seller = await User.findById(req.body.sellerId);
+    
     const newListing = await Listing.create({
       ...req.body,
       stockCount: stock,
-      status: stock > 0 ? "active" : "sold"
+      status: stock > 0 ? "active" : "sold",
+      sellerRating: seller ? seller.averageRating : 0,
+      sellerRatingCount: seller ? seller.ratingCount : 0
     });
     res.status(201).json(newListing);
   } catch (err) {
@@ -842,15 +688,10 @@ app.patch("/api/listings/:id/deduct-stock", async (req, res) => {
     const quantityToDeduct = Math.max(1, Number(req.body.quantity || 1));
     const listing = await Listing.findById(req.params.id);
     if (!listing) return res.status(404).json({ error: "Listing not found" });
-
     const currentStock = listing.stockCount != null ? listing.stockCount : 1;
     const newStock = Math.max(0, currentStock - quantityToDeduct);
-
     listing.stockCount = newStock;
-    if (newStock === 0) {
-      listing.status = "sold";
-    }
-
+    if (newStock === 0) listing.status = "sold";
     await listing.save();
     res.json(listing);
   } catch (err) {
@@ -861,9 +702,7 @@ app.patch("/api/listings/:id/deduct-stock", async (req, res) => {
 app.patch("/api/listings/:id/status", async (req, res) => {
   try {
     const updateData = { status: req.body.status };
-    if (req.body.status === "sold") {
-      updateData.stockCount = 0;
-    }
+    if (req.body.status === "sold") updateData.stockCount = 0;
     const updated = await Listing.findByIdAndUpdate(req.params.id, updateData, { new: true });
     res.json(updated);
   } catch (err) {
@@ -893,17 +732,12 @@ app.post("/api/conversations", async (req, res) => {
   try {
     const { listingId, listingTitle, buyerName, sellerName, initialMessage } = req.body;
     let conv = await Conversation.findOne({ listingId, buyerName });
-
     const formattedTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const msgText = initialMessage || `Hi ${sellerName}, is "${listingTitle}" still available?`;
 
     if (!conv) {
       conv = await Conversation.create({
-        listingId,
-        listingTitle,
-        buyerName,
-        sellerName,
-        messages: [{ sender: buyerName, text: msgText, time: formattedTime }]
+        listingId, listingTitle, buyerName, sellerName, messages: [{ sender: buyerName, text: msgText, time: formattedTime }]
       });
     } else if (initialMessage) {
       conv.messages.push({ sender: buyerName, text: initialMessage, time: formattedTime });
@@ -920,14 +754,41 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
     const { sender, text } = req.body;
     const conv = await Conversation.findById(req.params.id);
     if (!conv) return res.status(404).json({ error: "Conversation not found" });
-
-    conv.messages.push({
-      sender,
-      text,
-      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    });
+    conv.messages.push({ sender, text, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) });
     await conv.save();
     res.json(conv);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// NEW: Delete an individual message from a conversation
+app.delete("/api/conversations/:convId/messages/:msgId", async (req, res) => {
+  try {
+    const conv = await Conversation.findById(req.params.convId);
+    if (!conv) return res.status(404).json({ error: "Conversation not found" });
+
+    // Filter out the specific message by its subdocument ID
+    const initialLength = conv.messages.length;
+    conv.messages = conv.messages.filter((m) => m._id.toString() !== req.params.msgId);
+    
+    if (conv.messages.length === initialLength) {
+       return res.status(404).json({ error: "Message not found or already deleted" });
+    }
+
+    await conv.save();
+    res.json(conv);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// NEW: Delete an entire conversation thread
+app.delete("/api/conversations/:id", async (req, res) => {
+  try {
+    const deleted = await Conversation.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: "Conversation not found" });
+    res.json({ deleted: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -937,37 +798,15 @@ app.post("/api/shipping-quote", async (req, res) => {
   try {
     const { origin, destination } = req.body;
     if (!process.env.GOOGLE_MAPS_API_KEY) return res.status(500).json({ error: "Google Maps API key missing." });
-
     const mapUrl = "https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix";
-    const requestBody = {
-      origins: [{ waypoint: { address: origin } }],
-      destinations: [{ waypoint: { address: destination } }],
-      travelMode: "DRIVE"
-    };
-
-    const response = await fetch(mapUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": process.env.GOOGLE_MAPS_API_KEY,
-        "X-Goog-FieldMask": "originIndex,destinationIndex,duration,distanceMeters,status,condition"
-      },
-      body: JSON.stringify(requestBody)
-    });
-
+    const requestBody = { origins: [{ waypoint: { address: origin } }], destinations: [{ waypoint: { address: destination } }], travelMode: "DRIVE" };
+    const response = await fetch(mapUrl, { method: "POST", headers: { "Content-Type": "application/json", "X-Goog-Api-Key": process.env.GOOGLE_MAPS_API_KEY, "X-Goog-FieldMask": "originIndex,destinationIndex,duration,distanceMeters,status,condition" }, body: JSON.stringify(requestBody) });
     const data = await response.json();
-
     if (data.error) return res.status(400).json({ error: `Google API Error: ${data.error.message}` });
-
     if (Array.isArray(data) && data.length > 0) {
       if (data[0].distanceMeters != null) {
         const distanceKm = Math.ceil(data[0].distanceMeters / 1000);
-        return res.json({
-          success: true,
-          distanceKm,
-          shippingCost: distanceKm * 20,
-          formattedDistance: `${distanceKm} km`
-        });
+        return res.json({ success: true, distanceKm, shippingCost: distanceKm * 20, formattedDistance: `${distanceKm} km` });
       } else if (data[0].status && data[0].status.message) {
         return res.status(400).json({ error: `Google Maps: ${data[0].status.message}` });
       }
