@@ -9,34 +9,47 @@ export default function PortalLayout({
   children
 }) {
   const isStaff = currentUser?.role === "admin" || currentUser?.role === "viewer";
+  const isDriver = currentUser?.role === "driver";
 
-  // Requirement 2: Admin and Viewer ONLY have access to the Admin Portal tab.
-  // Regular users see the marketplace tabs plus the new Orders & Ratings tab.
-  const navItems = isStaff
-    ? [
-        {
-          id: "admin",
-          label: currentUser.role === "admin" ? "Admin Portal" : "Viewer Portal (Read-Only)",
-          icon: "🛡️",
-          badge: null
-        }
-      ]
-    : [
-        { id: "search", label: "Search", icon: "🔍", badge: null },
-        { id: "messages", label: "Messages", icon: "💬", badge: counts.unreadMessages },
-        { id: "post", label: "Post Ad", icon: "➕", badge: null },
-        { id: "listings", label: "My Listings", icon: "📦", badge: counts.myListings },
-        { id: "orders", label: "Orders & Ratings", icon: "⭐", badge: counts.orders },
-        { id: "favourites", label: "Saved", icon: "❤️", badge: counts.favourites },
-        { id: "cart", label: "Cart", icon: "🛒", badge: counts.cart }
-      ];
+  // Enforce strict navigation locks based on user roles
+  let navItems = [];
+
+  if (isDriver) {
+    navItems = [
+      {
+        id: "driver",
+        label: "Driver Portal",
+        icon: "🚚",
+        badge: null
+      }
+    ];
+  } else if (isStaff) {
+    navItems = [
+      {
+        id: "admin",
+        label: currentUser.role === "admin" ? "Admin Portal" : "Viewer Portal (Read-Only)",
+        icon: "🛡️",
+        badge: null
+      }
+    ];
+  } else {
+    navItems = [
+      { id: "search", label: "Search", icon: "🔍", badge: null },
+      { id: "messages", label: "Messages", icon: "💬", badge: counts.unreadMessages },
+      { id: "post", label: "Post Ad", icon: "➕", badge: null },
+      { id: "listings", label: "My Listings", icon: "📦", badge: counts.myListings },
+      { id: "orders", label: "Orders & Ratings", icon: "⭐", badge: counts.orders },
+      { id: "favourites", label: "Saved", icon: "❤️", badge: counts.favourites },
+      { id: "cart", label: "Cart", icon: "🛒", badge: counts.cart }
+    ];
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
       <header className="bg-black text-white sticky top-0 z-30 shadow-md">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div
-            onClick={() => setActiveTab(isStaff ? "admin" : "search")}
+            onClick={() => setActiveTab(isDriver ? "driver" : isStaff ? "admin" : "search")}
             className="flex items-center gap-2 cursor-pointer"
           >
             <span className="bg-emerald-500 text-slate-950 font-black px-2.5 py-1 rounded text-lg tracking-tight">
@@ -45,7 +58,11 @@ export default function PortalLayout({
             <div>
               <h1 className="font-bold text-base leading-none">GoGyMarket</h1>
               <span className="text-xs text-slate-400">
-                {isStaff ? "Administration & Analytics Console" : "Buyer & Seller Unified Hub"}
+                {isDriver 
+                  ? "Delivery Dispatch Portal" 
+                  : isStaff 
+                  ? "Administration & Analytics Console" 
+                  : "Buyer & Seller Unified Hub"}
               </span>
             </div>
           </div>
@@ -57,7 +74,7 @@ export default function PortalLayout({
             <div className="hidden sm:block text-left mr-2">
               <div className="flex items-center gap-1.5">
                 <p className="text-xs font-semibold leading-none">{currentUser?.name || "User"}</p>
-                {isStaff && (
+                {(isStaff || isDriver) && (
                   <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[9px] font-black uppercase px-1.5 py-0.5 rounded">
                     {currentUser.role}
                   </span>
