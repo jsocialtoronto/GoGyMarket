@@ -35,7 +35,8 @@ function validateStrictPassword(pw) {
 const userSchema = new mongoose.Schema(
   {
     accountType: { type: String, enum: ["personal", "business"], default: "personal" },
-    role: { type: String, enum: ["user", "admin", "viewer"], default: "user", index: true },
+    // NEW: Added 'driver' role
+    role: { type: String, enum: ["user", "admin", "viewer", "driver"], default: "user", index: true },
     name: { type: String, required: true },
     email: { type: String, lowercase: true },
     phone: { type: String },
@@ -53,7 +54,6 @@ const listingSchema = new mongoose.Schema(
   {
     sellerId: { type: String, required: true, index: true },
     sellerName: { type: String, required: true },
-    // NEW: Attach rating to listings for immediate frontend rendering
     sellerRating: { type: Number, default: 0 },
     sellerRatingCount: { type: Number, default: 0 },
     title: { type: String, required: true, trim: true },
@@ -126,17 +126,31 @@ const orderSchema = new mongoose.Schema(
       required: true,
       index: true
     },
+    // NEW: Dispatch Status for Drivers (N/A for pickup, pending for waiting drivers, active for accepted)
+    dispatchStatus: {
+      type: String,
+      enum: ["N/A", "pending", "active", "completed"],
+      default: "N/A",
+      index: true
+    },
+    driverId: { type: String, default: null },
+    driverName: { type: String, default: null },
     items: [
       {
         listingId: { type: String, required: true },
         title: { type: String, required: true },
         sellerId: { type: String, index: true },
         sellerName: { type: String, required: true },
+        sellerLocation: { type: String, default: "" }, // Needed for driver pickup
         quantity: { type: Number, required: true, default: 1 },
         unitPrice: { type: Number, required: true, default: 0 },
         shippingCost: { type: Number, default: 0 },
         deliveryMethod: { type: String, default: "pickup" },
+        // NEW: Buyer Location Preferences
+        buyerLocationType: { type: String, default: "address" }, // 'address' or 'pin'
         buyerAddress: { type: String, default: "" },
+        buyerPin: { type: String, default: "" },
+        specialInstructions: { type: String, default: "" },
         image: { type: String }
       }
     ],
@@ -152,7 +166,6 @@ const orderSchema = new mongoose.Schema(
 
 const Order = mongoose.model("Order", orderSchema);
 
-// UPDATE: One-Way Rating Schema (Buyer -> Seller)
 const ratingSchema = new mongoose.Schema(
   {
     orderId: { type: String, required: true, index: true },
@@ -196,6 +209,7 @@ async function initializeDatabase() {
   }
 }
 
+// UPDATE: Added "driver" to allowed staff roles
 async function verifyStaff(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
@@ -206,8 +220,8 @@ async function verifyStaff(req, res, next) {
     const decoded = jwt.verify(token, JWT_SECRET);
     const user = await User.findById(decoded.id);
 
-    if (!user || (user.role !== "admin" && user.role !== "viewer")) {
-      return res.status(403).json({ error: "Forbidden: Staff access required" });
+    if (!user || !["admin", "viewer", "driver"].includes(user.role)) {
+      return res.status(403).json({ error: "Forbidden: Staff/Driver access required" });
     }
     req.staffUser = user;
     next();
@@ -252,7 +266,6 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", dbConnected: mongoose.connection.readyState === 1 });
 });
 
-// AUTH ROUTES
 app.post("/api/auth/register", async (req, res) => {
   try {
     const { accountType, firstName, lastName, businessName, contactMethod, password, location } = req.body;
@@ -341,10 +354,12 @@ app.post("/api/orders", async (req, res) => {
     else if (paymentMethod === "pickup") initialStatus = "pickup_pending";
 
     const orderNumber = "ORD-" + Math.floor(100000 + Math.random() * 900000);
+    let requiresDriver = false;
 
     for (const item of items) {
       const qty = Math.max(1, Number(item.quantity || 1));
       if (item.deliveryMethod === "delivery") {
+        requiresDriver = true;
         const listing = await Listing.findById(item.listingId || item._id);
         if (listing) {
           const currentStock = listing.stockCount != null ? listing.stockCount : 1;
@@ -361,16 +376,23 @@ app.post("/api/orders", async (req, res) => {
       title: i.title,
       sellerId: i.sellerId,
       sellerName: i.sellerName,
+      // Pass the seller's location for the driver
+      sellerLocation: i.location || i.sellerLocation || "",
       quantity: Number(i.quantity || 1),
       unitPrice: Number(i.price || i.unitPrice || 0),
       shippingCost: Number(i.shippingCost || 0),
       deliveryMethod: i.deliveryMethod || "pickup",
+      // Buyer's precise location preferences
+      buyerLocationType: i.buyerLocationType || "address",
       buyerAddress: i.buyerAddress || "",
+      buyerPin: i.buyerPin || "",
+      specialInstructions: i.specialInstructions || "",
       image: i.images?.[0] || i.image || ""
     }));
 
     const newOrder = await Order.create({
       orderNumber, buyerId, buyerName, buyerContact, paymentMethod, paymentOptionLabel, status: initialStatus,
+      dispatchStatus: requiresDriver ? "pending" : "N/A", // Trigger Admin/Driver dispatch
       items: formattedItems, itemSubtotal: Number(itemSubtotal || 0), deliveryTotal: Number(deliveryTotal || 0), grandTotal: Number(grandTotal || 0), lockboxPhoto: lockboxPhoto || null
     });
 
@@ -380,7 +402,7 @@ app.post("/api/orders", async (req, res) => {
       if (paymentMethod === "pickup") {
         msg = `🧾 ORDER ${orderNumber} (Option 1: Local Pickup)\nItem: ${item.quantity}x ${item.title}\nItem Total: $${itemTotal.toLocaleString()} GYD\n\nBuyer ${buyerName} selected Local Pickup. Please coordinate pickup time and payment directly in this chat.`;
       } else if (paymentMethod === "credit") {
-        msg = `✅ ORDER ${orderNumber} ACTIVE & PAID (Credit Card)\nItem: ${item.quantity}x ${item.title}\nItem Total: $${itemTotal.toLocaleString()} GYD\nDelivery Fee: $${item.shippingCost.toLocaleString()} GYD\nDeliver To: ${item.buyerAddress}\n\nPayment is complete! Seller ${item.sellerName}, please prepare this item for delivery pickup.`;
+        msg = `✅ ORDER ${orderNumber} ACTIVE & PAID (Credit Card)\nItem: ${item.quantity}x ${item.title}\nItem Total: $${itemTotal.toLocaleString()} GYD\nDelivery Fee: $${item.shippingCost.toLocaleString()} GYD\n\nPayment is complete! Seller ${item.sellerName}, please prepare this item for delivery pickup.`;
       } else if (paymentMethod === "etransfer") {
         msg = `⏳ ORDER ${orderNumber} PENDING ADMIN VERIFICATION (eTransfer to gogymarket.com)\nItem: ${item.quantity}x ${item.title}\nTotal Due: $${(itemTotal + item.shippingCost).toLocaleString()} GYD\n\nOnce GoGyMarket Admin verifies the eTransfer, the seller will be notified that the item is ready for pickup.`;
       } else if (paymentMethod === "cash") {
@@ -419,7 +441,6 @@ app.get("/api/ratings", async (req, res) => {
   }
 });
 
-// UPDATE: Strictly One-Way Rating (Buyer Rates Seller)
 app.post("/api/ratings", async (req, res) => {
   try {
     const { orderId, listingId, raterId, raterName, targetUserId, targetUserName, stars, comment } = req.body;
@@ -452,10 +473,7 @@ app.post("/api/ratings", async (req, res) => {
     const totalStars = allTargetRatings.reduce((sum, r) => sum + r.stars, 0);
     const avg = Number((totalStars / allTargetRatings.length).toFixed(1));
 
-    // Update Seller's Global Score
     await User.findByIdAndUpdate(targetUserId, { averageRating: avg, ratingCount: allTargetRatings.length });
-    
-    // NEW: Update all of the Seller's active listings so the rating shows up in Search results
     await Listing.updateMany(
       { sellerId: targetUserId },
       { sellerRating: avg, sellerRatingCount: allTargetRatings.length }
@@ -543,7 +561,7 @@ app.patch("/api/admin/orders/:id/verify", verifyStaff, requireFullAdmin, async (
     for (const item of order.items) {
       await sendOrderNotification({
         listingId: item.listingId, listingTitle: item.title, buyerName: order.buyerName, sellerName: item.sellerName,
-        text: `✅ PAYMENT VERIFIED BY ADMIN (${previousType})\nOrder: ${order.orderNumber}\nItem: ${item.quantity}x ${item.title}\nDeliver To: ${item.buyerAddress}\n\n🔔 Notification to Seller (${item.sellerName}): Payment has been verified by GoGyMarket Admin. Your item is now ACTIVE and ready for delivery pickup! The Buyer can now rate this transaction.`
+        text: `✅ PAYMENT VERIFIED BY ADMIN (${previousType})\nOrder: ${order.orderNumber}\nItem: ${item.quantity}x ${item.title}\n\n🔔 Notification to Seller (${item.sellerName}): Payment has been verified by GoGyMarket Admin. Your item is now ACTIVE and ready for delivery pickup! The Buyer can now rate this transaction.`
       });
     }
     res.json(order);
@@ -574,6 +592,8 @@ app.patch("/api/admin/orders/:id/cancel", verifyStaff, requireFullAdmin, async (
     }
 
     order.status = "cancelled";
+    // Also cancel the dispatch request if it was pending
+    if (order.dispatchStatus === "pending") order.dispatchStatus = "N/A";
     order.verifiedBy = req.staffUser.name;
     order.verifiedAt = new Date();
     await order.save();
@@ -595,7 +615,7 @@ app.get("/api/admin/users", verifyStaff, async (req, res) => {
 app.post("/api/admin/users", verifyStaff, requireFullAdmin, async (req, res) => {
   try {
     const { name, contactMethod, password, role, accountType, location } = req.body;
-    if (!["user", "admin", "viewer"].includes(role)) return res.status(400).json({ error: "Role must be 'user', 'admin', or 'viewer'." });
+    if (!["user", "admin", "viewer", "driver"].includes(role)) return res.status(400).json({ error: "Role must be 'user', 'admin', 'viewer', or 'driver'." });
     const pwError = validateStrictPassword(password);
     if (pwError) return res.status(400).json({ error: pwError });
     const isEmail = contactMethod.includes("@");
@@ -649,13 +669,55 @@ app.patch("/api/admin/users/:id/reset-password", verifyStaff, requireFullAdmin, 
 });
 
 // ==========================================
-// 6. LISTINGS, CONVERSATIONS & SHIPPING ROUTES
+// 6. DRIVER API ROUTES
+// ==========================================
+
+// GET all active and pending delivery requests (For Drivers)
+app.get("/api/driver/orders", verifyStaff, async (req, res) => {
+  try {
+    if (req.staffUser.role !== "driver" && req.staffUser.role !== "admin") {
+      return res.status(403).json({ error: "Driver or Admin access required." });
+    }
+    // Drivers see orders where dispatch is needed, ignoring cancelled ones
+    const orders = await Order.find({
+      dispatchStatus: { $in: ["pending", "active"] },
+      status: { $ne: "cancelled" }
+    }).sort({ createdAt: -1 });
+    res.json(orders);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH Accept a pending delivery request (For Drivers)
+app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
+  try {
+    if (req.staffUser.role !== "driver") {
+      return res.status(403).json({ error: "Only drivers can accept delivery requests." });
+    }
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ error: "Order not found." });
+    if (order.status === "cancelled") return res.status(400).json({ error: "Order has been cancelled." });
+    if (order.dispatchStatus !== "pending") return res.status(400).json({ error: "This delivery is already active or completed." });
+
+    order.dispatchStatus = "active";
+    order.driverId = req.staffUser._id;
+    order.driverName = req.staffUser.name;
+    await order.save();
+    
+    res.json(order);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+
+// ==========================================
+// 7. LISTINGS, CONVERSATIONS & SHIPPING ROUTES
 // ==========================================
 
 app.get("/api/listings", async (req, res) => {
   try {
-    // When a seller logs in, we might want to ensure we fetch their latest rating for new posts.
-    // For now, sorting by newest first.
     const listings = await Listing.find().sort({ createdAt: -1 });
     res.json(listings);
   } catch (err) {
@@ -666,10 +728,7 @@ app.get("/api/listings", async (req, res) => {
 app.post("/api/listings", async (req, res) => {
   try {
     const stock = req.body.stockCount != null ? Number(req.body.stockCount) : 1;
-    
-    // When a new listing is created, grab the seller's current average rating from the User profile
     const seller = await User.findById(req.body.sellerId);
-    
     const newListing = await Listing.create({
       ...req.body,
       stockCount: stock,
@@ -762,20 +821,13 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
   }
 });
 
-// NEW: Delete an individual message from a conversation
 app.delete("/api/conversations/:convId/messages/:msgId", async (req, res) => {
   try {
     const conv = await Conversation.findById(req.params.convId);
     if (!conv) return res.status(404).json({ error: "Conversation not found" });
-
-    // Filter out the specific message by its subdocument ID
     const initialLength = conv.messages.length;
     conv.messages = conv.messages.filter((m) => m._id.toString() !== req.params.msgId);
-    
-    if (conv.messages.length === initialLength) {
-       return res.status(404).json({ error: "Message not found or already deleted" });
-    }
-
+    if (conv.messages.length === initialLength) return res.status(404).json({ error: "Message not found or already deleted" });
     await conv.save();
     res.json(conv);
   } catch (err) {
@@ -783,7 +835,6 @@ app.delete("/api/conversations/:convId/messages/:msgId", async (req, res) => {
   }
 });
 
-// NEW: Delete an entire conversation thread
 app.delete("/api/conversations/:id", async (req, res) => {
   try {
     const deleted = await Conversation.findByIdAndDelete(req.params.id);
@@ -818,7 +869,7 @@ app.post("/api/shipping-quote", async (req, res) => {
 });
 
 // ==========================================
-// 7. DATABASE CONNECTION & SERVER START
+// 8. DATABASE CONNECTION & SERVER START
 // ==========================================
 if (process.env.MONGO_URI) {
   mongoose
