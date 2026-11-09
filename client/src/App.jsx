@@ -17,7 +17,6 @@ export default function App() {
 
   const isStaff = currentUser?.role === "admin" || currentUser?.role === "viewer";
 
-  // Default tab: Admin portal for staff, Search for regular users
   const [activeTab, setActiveTab] = useState(isStaff ? "admin" : "search");
   const [selectedListing, setSelectedListing] = useState(null);
   const [listings, setListings] = useState([]);
@@ -42,7 +41,6 @@ export default function App() {
 
   const [sellQuantities, setSellQuantities] = useState({});
 
-  // User Orders & Ratings State
   const [myOrders, setMyOrders] = useState([]);
   const [allRatings, setAllRatings] = useState([]);
   const [ratingStars, setRatingStars] = useState({});
@@ -317,6 +315,40 @@ export default function App() {
     }
   };
 
+  // NEW: Delete an individual message
+  const handleDeleteMessage = async (convId, msgId) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/conversations/${convId}/messages/${msgId}`, {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        const updatedConv = await res.json();
+        setConversations((prev) => prev.map((c) => (c._id === convId ? updatedConv : c)));
+      }
+    } catch (err) {
+      console.error("Failed to delete message:", err);
+    }
+  };
+
+  // NEW: Delete an entire conversation thread
+  const handleDeleteConversation = async (e, convId) => {
+    e.stopPropagation();
+    const confirmed = window.confirm("Are you sure you want to permanently delete this entire conversation?");
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/conversations/${convId}`, {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        setConversations((prev) => prev.filter((c) => c._id !== convId));
+        if (activeConvId === convId) setActiveConvId(null);
+      }
+    } catch (err) {
+      console.error("Failed to delete conversation:", err);
+    }
+  };
+
   const handleSubmitRating = async (orderId, listingId, targetUserId, targetUserName, raterRole) => {
     setRatingError("");
     const stars = ratingStars[`${orderId}_${listingId}`] || 5;
@@ -348,6 +380,9 @@ export default function App() {
 
       setAllRatings((prev) => [data, ...prev]);
       alert("Rating submitted successfully!");
+      
+      // Refresh to pull down the newly updated seller global average from the backend
+      loadMarketplaceData();
     } catch (err) {
       setRatingError(err.message);
     }
@@ -404,7 +439,6 @@ export default function App() {
         orders: myOrders.length
       }}
     >
-      {/* If logged in as staff (Admin or Viewer), render Admin Dashboard */}
       {isStaff ? (
         <AdminDashboard currentUser={currentUser} onOrdersUpdated={loadMarketplaceData} />
       ) : selectedListing ? (
@@ -424,7 +458,6 @@ export default function App() {
         />
       ) : (
         <>
-          {/* SEARCH PORTAL VIEW */}
           {activeTab === "search" && (
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               <aside className="bg-white p-4 rounded-xl border border-slate-200 h-fit space-y-4">
@@ -565,8 +598,12 @@ export default function App() {
                               </h3>
                             </div>
                             <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                              <span className="truncate max-w-[140px]">📍 {item.location}</span>
-                              <span className="text-emerald-600 font-bold group-hover:underline">View ›</span>
+                              <span className="truncate max-w-[100px]">📍 {item.location}</span>
+                              {item.sellerRatingCount > 0 ? (
+                                <span className="font-bold text-yellow-600">⭐ {item.sellerRating}</span>
+                              ) : (
+                                <span className="text-slate-400 font-semibold">New Seller</span>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -578,7 +615,6 @@ export default function App() {
             </div>
           )}
 
-          {/* SHOPPING CART, CHECKOUT & SUCCESS RECEIPT */}
           {activeTab === "cart" && (
             <div className="max-w-4xl mx-auto space-y-6">
               {completedOrder ? (
@@ -871,7 +907,7 @@ export default function App() {
                               <div>
                                 <p className="text-slate-900 font-bold">Option 3: eTransfer</p>
                                 <p className="text-slate-500 font-normal">
-                                  Send to <span className="font-bold text-slate-800">gogymarket.com</span> (Admin verifies & notifies seller)
+                                  Send to <span className="font-bold text-slate-800">gogymarket.com</span> (Admin verifies)
                                 </p>
                               </div>
                             </label>
@@ -956,7 +992,7 @@ export default function App() {
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900">My Completed Orders & Reviews</h2>
                   <p className="text-xs text-slate-500">
-                    Rate buyers and sellers for transactions that have been successfully paid and verified.
+                    Buyers can review sellers on transactions that are successfully paid and verified.
                   </p>
                 </div>
                 <button
@@ -978,7 +1014,7 @@ export default function App() {
                   <span className="text-4xl">⭐</span>
                   <h3 className="text-lg font-bold text-slate-700">No order history yet</h3>
                   <p className="text-xs text-slate-400">
-                    Complete a purchase or make a sale to leave reviews here.
+                    Complete a purchase or make a sale to track it here.
                   </p>
                 </div>
               ) : (
@@ -1023,11 +1059,9 @@ export default function App() {
 
                         <div className="space-y-3">
                           {order.items.map((item, idx) => {
-                            const isThisItemSeller = String(item.sellerId) === String(currentUser.id);
-                            // Target to rate: if I'm the buyer, I rate the seller. If I'm the seller, I rate the buyer.
-                            const targetUserId = isBuyer ? item.sellerId : order.buyerId;
-                            const targetUserName = isBuyer ? item.sellerName : order.buyerName;
-                            const raterRole = isBuyer ? "buyer" : "seller";
+                            const targetUserId = item.sellerId;
+                            const targetUserName = item.sellerName;
+                            const raterRole = "buyer"; // Strictly one-way now
 
                             const existingRating = allRatings.find(
                               (r) =>
@@ -1064,11 +1098,15 @@ export default function App() {
                                   </span>
                                 </div>
 
-                                {/* RATING SECTION (Strictly guarded by isPaidAndActive) */}
+                                {/* ONE-WAY RATING SECTION */}
                                 <div className="pt-3 border-t border-slate-200">
                                   {!isPaidAndActive ? (
                                     <p className="text-xs text-amber-700 font-semibold italic">
                                       🔒 Rating available once payment is verified and transaction is Active.
+                                    </p>
+                                  ) : !isBuyer ? (
+                                    <p className="text-xs text-slate-500 italic font-semibold">
+                                      As the Seller, you must wait for the Buyer to leave a review for your service.
                                     </p>
                                   ) : existingRating ? (
                                     <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-lg text-xs space-y-1">
@@ -1080,9 +1118,9 @@ export default function App() {
                                   ) : (
                                     <div className="space-y-2 bg-white p-3 rounded-lg border border-slate-200">
                                       <p className="text-xs font-bold text-slate-700">
-                                        Leave a review for {targetUserName} ({raterRole === "buyer" ? "Seller" : "Buyer"}):
+                                        Leave a review for Seller ({targetUserName}):
                                       </p>
-                                      <div className="flex items-center gap-3">
+                                      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                                         <select
                                           value={ratingStars[`${order._id}_${item.listingId}`] || 5}
                                           onChange={(e) =>
@@ -1109,7 +1147,7 @@ export default function App() {
                                               [`${order._id}_${item.listingId}`]: e.target.value
                                             }))
                                           }
-                                          className="flex-1 border border-slate-300 rounded px-3 py-1 text-xs"
+                                          className="flex-1 w-full sm:w-auto border border-slate-300 rounded px-3 py-1.5 text-xs"
                                         />
                                         <button
                                           onClick={() =>
@@ -1121,7 +1159,7 @@ export default function App() {
                                               raterRole
                                             )
                                           }
-                                          className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-1.5 rounded shadow-sm"
+                                          className="bg-emerald-600 hover:bg-emerald-500 w-full sm:w-auto text-white font-bold text-xs px-3 py-1.5 rounded shadow-sm"
                                         >
                                           Submit Review
                                         </button>
@@ -1144,9 +1182,9 @@ export default function App() {
           {/* MESSAGES VIEW */}
           {activeTab === "messages" && (
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden grid grid-cols-1 md:grid-cols-3 min-h-[480px]">
-              <div className="border-r border-slate-200 p-4 space-y-2">
+              <div className="border-r border-slate-200 p-4 space-y-2 overflow-y-auto max-h-[480px]">
                 <h2 className="font-bold text-sm uppercase tracking-wider text-slate-500 mb-3">
-                  Active Conversations
+                  Conversations
                 </h2>
                 {conversations.length === 0 ? (
                   <p className="text-xs text-slate-400">No messages yet.</p>
@@ -1155,49 +1193,82 @@ export default function App() {
                     <div
                       key={conv._id}
                       onClick={() => setActiveConvId(conv._id)}
-                      className={`p-3 rounded-lg cursor-pointer border ${
+                      className={`p-3 rounded-lg cursor-pointer border transition-colors ${
                         activeConvId === conv._id
                           ? "bg-emerald-50 border-emerald-300"
                           : "border-slate-200 hover:bg-slate-50"
                       }`}
                     >
-                      <div className="flex justify-between text-xs font-bold text-slate-800">
-                        <span>{conv.sellerName}</span>
-                        <span className="text-emerald-700">Chat</span>
+                      <div className="flex justify-between items-start text-xs font-bold text-slate-800">
+                        <div className="flex-1">
+                          <span>{conv.sellerName}</span>
+                          <p className="text-xs text-slate-600 font-medium truncate mt-0.5">
+                            {conv.listingTitle}
+                          </p>
+                        </div>
+                        {/* Delete Conversation Button */}
+                        <button
+                          onClick={(e) => handleDeleteConversation(e, conv._id)}
+                          className="ml-2 text-slate-300 hover:text-red-500 transition-colors"
+                          title="Delete Thread"
+                        >
+                          🗑️
+                        </button>
                       </div>
-                      <p className="text-xs text-slate-600 font-medium truncate mt-0.5">
-                        {conv.listingTitle}
-                      </p>
                     </div>
                   ))
                 )}
               </div>
+              
               <div className="md:col-span-2 flex flex-col justify-between p-4 bg-slate-50">
                 {activeConversation ? (
                   <>
-                    <div className="space-y-3 overflow-y-auto max-h-80">
+                    <div className="space-y-4 overflow-y-auto max-h-80 pr-2">
                       {activeConversation.messages.map((m, idx) => {
                         const isMe = m.sender === currentUser.name;
                         const isAdminMsg = m.sender === "GoGyMarket Admin";
                         return (
                           <div
-                            key={idx}
+                            key={m._id || idx}
                             className={`flex flex-col ${
                               isAdminMsg ? "items-center" : isMe ? "items-end" : "items-start"
                             }`}
                           >
-                            <div
-                              className={`px-3.5 py-2 rounded-xl text-sm max-w-md whitespace-pre-wrap ${
-                                isAdminMsg
-                                  ? "bg-amber-50 border border-amber-300 text-amber-950 font-medium"
-                                  : isMe
-                                  ? "bg-emerald-600 text-white"
-                                  : "bg-white border border-slate-200 text-slate-800"
-                              }`}
-                            >
-                              {m.text}
+                            <div className="flex items-center gap-2">
+                              {/* Delete Individual Message (Only for non-admin messages if it's the user's side, or let them delete any from their view) */}
+                              {isMe && !isAdminMsg && (
+                                <button
+                                  onClick={() => handleDeleteMessage(activeConversation._id, m._id)}
+                                  className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity"
+                                  title="Delete Message"
+                                >
+                                  🗑️
+                                </button>
+                              )}
+
+                              <div
+                                className={`px-4 py-2.5 rounded-xl text-sm max-w-md whitespace-pre-wrap ${
+                                  isAdminMsg
+                                    ? "bg-amber-50 border border-amber-300 text-amber-950 font-medium"
+                                    : isMe
+                                    ? "bg-emerald-600 text-white"
+                                    : "bg-white border border-slate-200 text-slate-800"
+                                }`}
+                              >
+                                {m.text}
+                              </div>
+
+                              {!isMe && !isAdminMsg && m._id && (
+                                <button
+                                  onClick={() => handleDeleteMessage(activeConversation._id, m._id)}
+                                  className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity"
+                                  title="Delete Message"
+                                >
+                                  🗑️
+                                </button>
+                              )}
                             </div>
-                            <span className="text-[10px] text-slate-400 mt-0.5">
+                            <span className="text-[10px] text-slate-400 mt-1 px-1">
                               {m.sender} • {m.time}
                             </span>
                           </div>
@@ -1210,11 +1281,11 @@ export default function App() {
                         placeholder="Write a message..."
                         value={replyText}
                         onChange={(e) => setReplyText(e.target.value)}
-                        className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white"
+                        className="flex-1 rounded-lg border border-slate-300 px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-emerald-500"
                       />
                       <button
                         type="submit"
-                        className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-semibold"
+                        className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors"
                       >
                         Send
                       </button>
@@ -1229,7 +1300,6 @@ export default function App() {
             </div>
           )}
 
-          {/* POST LISTING VIEW */}
           {activeTab === "post" && (
             <PostListingForm
               currentUser={currentUser}
@@ -1239,7 +1309,6 @@ export default function App() {
             />
           )}
 
-          {/* MY LISTINGS VIEW */}
           {activeTab === "listings" && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -1350,7 +1419,6 @@ export default function App() {
             </div>
           )}
 
-          {/* FAVOURITES VIEW */}
           {activeTab === "favourites" && (
             <div className="space-y-4">
               <h2 className="text-xl font-bold">Saved Favourites</h2>
