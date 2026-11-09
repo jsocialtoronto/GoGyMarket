@@ -15,7 +15,10 @@ export default function App() {
     return saved ? JSON.parse(saved) : null;
   });
 
-  const [activeTab, setActiveTab] = useState("search");
+  const isStaff = currentUser?.role === "admin" || currentUser?.role === "viewer";
+
+  // Default tab: Admin portal for staff, Search for regular users
+  const [activeTab, setActiveTab] = useState(isStaff ? "admin" : "search");
   const [selectedListing, setSelectedListing] = useState(null);
   const [listings, setListings] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -38,6 +41,13 @@ export default function App() {
   const [completedOrder, setCompletedOrder] = useState(null);
 
   const [sellQuantities, setSellQuantities] = useState({});
+
+  // User Orders & Ratings State
+  const [myOrders, setMyOrders] = useState([]);
+  const [allRatings, setAllRatings] = useState([]);
+  const [ratingStars, setRatingStars] = useState({});
+  const [ratingComment, setRatingComment] = useState({});
+  const [ratingError, setRatingError] = useState("");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCat, setSelectedCat] = useState("");
@@ -63,6 +73,15 @@ export default function App() {
         const convsData = await convsRes.json();
         setConversations(convsData);
         if (convsData.length > 0 && !activeConvId) setActiveConvId(convsData[0]._id);
+      }
+
+      if (currentUser && !isStaff) {
+        const [ordersRes, ratingsRes] = await Promise.all([
+          fetch(`${API_BASE}/api/orders/user/${currentUser.id}`),
+          fetch(`${API_BASE}/api/ratings`)
+        ]);
+        if (ordersRes.ok) setMyOrders(await ordersRes.json());
+        if (ratingsRes.ok) setAllRatings(await ratingsRes.json());
       }
     } catch (err) {
       console.error("Error loading data from Render:", err);
@@ -298,6 +317,42 @@ export default function App() {
     }
   };
 
+  const handleSubmitRating = async (orderId, listingId, targetUserId, targetUserName, raterRole) => {
+    setRatingError("");
+    const stars = ratingStars[`${orderId}_${listingId}`] || 5;
+    const comment = ratingComment[`${orderId}_${listingId}`] || "";
+
+    if (!comment.trim()) {
+      setRatingError("Please write a comment for your review.");
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/ratings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId,
+          listingId,
+          raterId: currentUser.id,
+          raterName: currentUser.name,
+          raterRole,
+          targetUserId,
+          targetUserName,
+          stars,
+          comment
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to submit rating");
+
+      setAllRatings((prev) => [data, ...prev]);
+      alert("Rating submitted successfully!");
+    } catch (err) {
+      setRatingError(err.message);
+    }
+  };
+
   const filteredListings = useMemo(() => {
     return listings.filter((item) => {
       const stock = item.stockCount != null ? Number(item.stockCount) : 1;
@@ -345,10 +400,14 @@ export default function App() {
         unreadMessages: conversations.length,
         myListings: myListings.length,
         favourites: favouriteListings.length,
-        cart: cart.reduce((sum, i) => sum + Number(i.quantity || 1), 0)
+        cart: cart.reduce((sum, i) => sum + Number(i.quantity || 1), 0),
+        orders: myOrders.length
       }}
     >
-      {selectedListing ? (
+      {/* If logged in as staff (Admin or Viewer), render Admin Dashboard */}
+      {isStaff ? (
+        <AdminDashboard currentUser={currentUser} onOrdersUpdated={loadMarketplaceData} />
+      ) : selectedListing ? (
         <ListingDetail
           listing={selectedListing}
           onClose={() => setSelectedListing(null)}
@@ -365,15 +424,7 @@ export default function App() {
         />
       ) : (
         <>
-          {/* 7. ADMINISTRATION PORTAL VIEW */}
-          {activeTab === "admin" && (
-            <AdminDashboard
-              currentUser={currentUser}
-              onOrdersUpdated={loadMarketplaceData}
-            />
-          )}
-
-          {/* 1. SEARCH PORTAL VIEW */}
+          {/* SEARCH PORTAL VIEW */}
           {activeTab === "search" && (
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               <aside className="bg-white p-4 rounded-xl border border-slate-200 h-fit space-y-4">
@@ -460,7 +511,7 @@ export default function App() {
                 ) : filteredListings.length === 0 ? (
                   <div className="bg-white p-10 rounded-xl border border-slate-200 text-center space-y-3">
                     <p className="text-slate-600 text-sm font-medium">
-                      No active listings yet. Click "Post Ad" to create your first listing!
+                      No active listings match this search.
                     </p>
                   </div>
                 ) : (
@@ -527,7 +578,7 @@ export default function App() {
             </div>
           )}
 
-          {/* 6. SHOPPING CART, 4-OPTION CHECKOUT & SUCCESS RECEIPT VIEW */}
+          {/* SHOPPING CART, CHECKOUT & SUCCESS RECEIPT */}
           {activeTab === "cart" && (
             <div className="max-w-4xl mx-auto space-y-6">
               {completedOrder ? (
@@ -542,7 +593,7 @@ export default function App() {
                         ? "Status: Waiting on Payment for eTransfer (Admin will verify and notify seller)"
                         : completedOrder.status === "waiting_cash"
                         ? "Status: Waiting on Confirmation of Cash (Admin will verify lockbox photo and notify seller)"
-                        : "Status: Active & Confirmed! A full breakdown has been sent to your Messages."}
+                        : "Status: Active & Confirmed! Both buyer and seller can now leave ratings."}
                     </p>
                   </div>
 
@@ -622,11 +673,11 @@ export default function App() {
                       <button
                         onClick={() => {
                           setCompletedOrder(null);
-                          setActiveTab("messages");
+                          setActiveTab("orders");
                         }}
                         className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-sm"
                       >
-                        💬 View Order in Messages
+                        ⭐ Go to Orders & Ratings
                       </button>
                       <button
                         onClick={() => {
@@ -898,7 +949,199 @@ export default function App() {
             </div>
           )}
 
-          {/* 2. MESSAGES PORTAL VIEW */}
+          {/* ORDERS & RATINGS PORTAL TAB */}
+          {activeTab === "orders" && (
+            <div className="max-w-4xl mx-auto space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">My Completed Orders & Reviews</h2>
+                  <p className="text-xs text-slate-500">
+                    Rate buyers and sellers for transactions that have been successfully paid and verified.
+                  </p>
+                </div>
+                <button
+                  onClick={loadMarketplaceData}
+                  className="text-xs font-bold text-emerald-700 hover:underline"
+                >
+                  ↻ Refresh Orders
+                </button>
+              </div>
+
+              {ratingError && (
+                <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-xs font-bold rounded-lg">
+                  ⚠️ {ratingError}
+                </div>
+              )}
+
+              {myOrders.length === 0 ? (
+                <div className="bg-white p-12 rounded-xl border border-slate-200 text-center space-y-3">
+                  <span className="text-4xl">⭐</span>
+                  <h3 className="text-lg font-bold text-slate-700">No order history yet</h3>
+                  <p className="text-xs text-slate-400">
+                    Complete a purchase or make a sale to leave reviews here.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {myOrders.map((order) => {
+                    const isPaidAndActive = order.status === "active";
+                    const isBuyer = String(order.buyerId) === String(currentUser.id);
+
+                    return (
+                      <div
+                        key={order._id}
+                        className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-4"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                          <div>
+                            <div className="flex items-center gap-3">
+                              <span className="font-black text-slate-900 text-base">
+                                {order.orderNumber}
+                              </span>
+                              <span
+                                className={`text-xs font-extrabold px-2.5 py-1 rounded-full ${
+                                  isPaidAndActive
+                                    ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                    : "bg-amber-100 text-amber-800 border border-amber-300"
+                                }`}
+                              >
+                                {isPaidAndActive ? "✅ Completed & Paid" : `⏳ Status: ${order.status}`}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-500 mt-1">
+                              {isBuyer ? `Seller Order` : `Buyer: ${order.buyerName}`} • Placed{" "}
+                              {new Date(order.createdAt).toLocaleString()}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs font-bold uppercase text-slate-400">Total Paid</p>
+                            <p className="text-lg font-black text-emerald-700">
+                              ${Number(order.grandTotal).toLocaleString()} GYD
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          {order.items.map((item, idx) => {
+                            const isThisItemSeller = String(item.sellerId) === String(currentUser.id);
+                            // Target to rate: if I'm the buyer, I rate the seller. If I'm the seller, I rate the buyer.
+                            const targetUserId = isBuyer ? item.sellerId : order.buyerId;
+                            const targetUserName = isBuyer ? item.sellerName : order.buyerName;
+                            const raterRole = isBuyer ? "buyer" : "seller";
+
+                            const existingRating = allRatings.find(
+                              (r) =>
+                                String(r.orderId) === String(order._id) &&
+                                String(r.listingId) === String(item.listingId) &&
+                                String(r.raterId) === String(currentUser.id)
+                            );
+
+                            return (
+                              <div
+                                key={idx}
+                                className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3"
+                              >
+                                <div className="flex items-center justify-between text-xs">
+                                  <div className="flex items-center gap-3">
+                                    {item.image && (
+                                      <img
+                                        src={item.image}
+                                        alt={item.title}
+                                        className="w-12 h-12 rounded object-cover border"
+                                      />
+                                    )}
+                                    <div>
+                                      <p className="font-bold text-slate-900 text-sm">
+                                        {item.quantity}x {item.title}
+                                      </p>
+                                      <p className="text-slate-500">
+                                        {isBuyer ? `Seller: ${item.sellerName}` : `Buyer: ${order.buyerName}`}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <span className="font-extrabold text-slate-800">
+                                    ${(item.unitPrice * item.quantity).toLocaleString()} GYD
+                                  </span>
+                                </div>
+
+                                {/* RATING SECTION (Strictly guarded by isPaidAndActive) */}
+                                <div className="pt-3 border-t border-slate-200">
+                                  {!isPaidAndActive ? (
+                                    <p className="text-xs text-amber-700 font-semibold italic">
+                                      🔒 Rating available once payment is verified and transaction is Active.
+                                    </p>
+                                  ) : existingRating ? (
+                                    <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-lg text-xs space-y-1">
+                                      <p className="font-bold text-emerald-900">
+                                        ⭐ You rated {targetUserName}: {existingRating.stars} / 5 Stars
+                                      </p>
+                                      <p className="text-slate-700">"{existingRating.comment}"</p>
+                                    </div>
+                                  ) : (
+                                    <div className="space-y-2 bg-white p-3 rounded-lg border border-slate-200">
+                                      <p className="text-xs font-bold text-slate-700">
+                                        Leave a review for {targetUserName} ({raterRole === "buyer" ? "Seller" : "Buyer"}):
+                                      </p>
+                                      <div className="flex items-center gap-3">
+                                        <select
+                                          value={ratingStars[`${order._id}_${item.listingId}`] || 5}
+                                          onChange={(e) =>
+                                            setRatingStars((prev) => ({
+                                              ...prev,
+                                              [`${order._id}_${item.listingId}`]: Number(e.target.value)
+                                            }))
+                                          }
+                                          className="border border-slate-300 rounded px-2 py-1 text-xs font-bold bg-white"
+                                        >
+                                          <option value="5">⭐⭐⭐⭐⭐ (5/5)</option>
+                                          <option value="4">⭐⭐⭐⭐ (4/5)</option>
+                                          <option value="3">⭐⭐⭐ (3/5)</option>
+                                          <option value="2">⭐⭐ (2/5)</option>
+                                          <option value="1">⭐ (1/5)</option>
+                                        </select>
+                                        <input
+                                          type="text"
+                                          placeholder="Write a comment about this transaction..."
+                                          value={ratingComment[`${order._id}_${item.listingId}`] || ""}
+                                          onChange={(e) =>
+                                            setRatingComment((prev) => ({
+                                              ...prev,
+                                              [`${order._id}_${item.listingId}`]: e.target.value
+                                            }))
+                                          }
+                                          className="flex-1 border border-slate-300 rounded px-3 py-1 text-xs"
+                                        />
+                                        <button
+                                          onClick={() =>
+                                            handleSubmitRating(
+                                              order._id,
+                                              item.listingId,
+                                              targetUserId,
+                                              targetUserName,
+                                              raterRole
+                                            )
+                                          }
+                                          className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-1.5 rounded shadow-sm"
+                                        >
+                                          Submit Review
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* MESSAGES VIEW */}
           {activeTab === "messages" && (
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden grid grid-cols-1 md:grid-cols-3 min-h-[480px]">
               <div className="border-r border-slate-200 p-4 space-y-2">
@@ -986,7 +1229,7 @@ export default function App() {
             </div>
           )}
 
-          {/* 3. POST LISTING VIEW */}
+          {/* POST LISTING VIEW */}
           {activeTab === "post" && (
             <PostListingForm
               currentUser={currentUser}
@@ -996,7 +1239,7 @@ export default function App() {
             />
           )}
 
-          {/* 4. MY LISTINGS & STOCK INVENTORY MANAGER */}
+          {/* MY LISTINGS VIEW */}
           {activeTab === "listings" && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -1107,7 +1350,7 @@ export default function App() {
             </div>
           )}
 
-          {/* 5. FAVOURITES VIEW */}
+          {/* FAVOURITES VIEW */}
           {activeTab === "favourites" && (
             <div className="space-y-4">
               <h2 className="text-xl font-bold">Saved Favourites</h2>
