@@ -35,7 +35,6 @@ function validateStrictPassword(pw) {
 const userSchema = new mongoose.Schema(
   {
     accountType: { type: String, enum: ["personal", "business"], default: "personal" },
-    // NEW: Added 'driver' role
     role: { type: String, enum: ["user", "admin", "viewer", "driver"], default: "user", index: true },
     name: { type: String, required: true },
     email: { type: String, lowercase: true },
@@ -126,7 +125,6 @@ const orderSchema = new mongoose.Schema(
       required: true,
       index: true
     },
-    // NEW: Dispatch Status for Drivers (N/A for pickup, pending for waiting drivers, active for accepted)
     dispatchStatus: {
       type: String,
       enum: ["N/A", "pending", "active", "completed"],
@@ -141,13 +139,12 @@ const orderSchema = new mongoose.Schema(
         title: { type: String, required: true },
         sellerId: { type: String, index: true },
         sellerName: { type: String, required: true },
-        sellerLocation: { type: String, default: "" }, // Needed for driver pickup
+        sellerLocation: { type: String, default: "" },
         quantity: { type: Number, required: true, default: 1 },
         unitPrice: { type: Number, required: true, default: 0 },
         shippingCost: { type: Number, default: 0 },
         deliveryMethod: { type: String, default: "pickup" },
-        // NEW: Buyer Location Preferences
-        buyerLocationType: { type: String, default: "address" }, // 'address' or 'pin'
+        buyerLocationType: { type: String, default: "address" },
         buyerAddress: { type: String, default: "" },
         buyerPin: { type: String, default: "" },
         specialInstructions: { type: String, default: "" },
@@ -209,7 +206,6 @@ async function initializeDatabase() {
   }
 }
 
-// UPDATE: Added "driver" to allowed staff roles
 async function verifyStaff(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
@@ -376,13 +372,11 @@ app.post("/api/orders", async (req, res) => {
       title: i.title,
       sellerId: i.sellerId,
       sellerName: i.sellerName,
-      // Pass the seller's location for the driver
       sellerLocation: i.location || i.sellerLocation || "",
       quantity: Number(i.quantity || 1),
       unitPrice: Number(i.price || i.unitPrice || 0),
       shippingCost: Number(i.shippingCost || 0),
       deliveryMethod: i.deliveryMethod || "pickup",
-      // Buyer's precise location preferences
       buyerLocationType: i.buyerLocationType || "address",
       buyerAddress: i.buyerAddress || "",
       buyerPin: i.buyerPin || "",
@@ -392,7 +386,7 @@ app.post("/api/orders", async (req, res) => {
 
     const newOrder = await Order.create({
       orderNumber, buyerId, buyerName, buyerContact, paymentMethod, paymentOptionLabel, status: initialStatus,
-      dispatchStatus: requiresDriver ? "pending" : "N/A", // Trigger Admin/Driver dispatch
+      dispatchStatus: requiresDriver ? "pending" : "N/A",
       items: formattedItems, itemSubtotal: Number(itemSubtotal || 0), deliveryTotal: Number(deliveryTotal || 0), grandTotal: Number(grandTotal || 0), lockboxPhoto: lockboxPhoto || null
     });
 
@@ -592,7 +586,6 @@ app.patch("/api/admin/orders/:id/cancel", verifyStaff, requireFullAdmin, async (
     }
 
     order.status = "cancelled";
-    // Also cancel the dispatch request if it was pending
     if (order.dispatchStatus === "pending") order.dispatchStatus = "N/A";
     order.verifiedBy = req.staffUser.name;
     order.verifiedAt = new Date();
@@ -672,29 +665,30 @@ app.patch("/api/admin/users/:id/reset-password", verifyStaff, requireFullAdmin, 
 // 6. DRIVER API ROUTES
 // ==========================================
 
-// GET all active and pending delivery requests (For Drivers)
 app.get("/api/driver/orders", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver" && req.staffUser.role !== "admin") {
       return res.status(403).json({ error: "Driver or Admin access required." });
     }
-    // Drivers see orders where dispatch is needed, ignoring cancelled ones
     const orders = await Order.find({
-      dispatchStatus: { $in: ["pending", "active"] },
+      dispatchStatus: { $in: ["pending", "active", "completed"] },
       status: { $ne: "cancelled" }
     }).sort({ createdAt: -1 });
-    res.json(orders);
+
+    // Drivers only see pending requests from everyone, plus their own active/completed deliveries
+    const filteredOrders = req.staffUser.role === "admin" 
+      ? orders 
+      : orders.filter(o => o.dispatchStatus === "pending" || String(o.driverId) === String(req.staffUser._id));
+
+    res.json(filteredOrders);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// PATCH Accept a pending delivery request (For Drivers)
 app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
   try {
-    if (req.staffUser.role !== "driver") {
-      return res.status(403).json({ error: "Only drivers can accept delivery requests." });
-    }
+    if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can accept delivery requests." });
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ error: "Order not found." });
     if (order.status === "cancelled") return res.status(400).json({ error: "Order has been cancelled." });
@@ -704,13 +698,38 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
     order.driverId = req.staffUser._id;
     order.driverName = req.staffUser.name;
     await order.save();
-    
     res.json(order);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
+// NEW: Complete an active delivery request
+app.patch("/api/driver/orders/:id/complete", verifyStaff, async (req, res) => {
+  try {
+    if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can complete delivery requests." });
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ error: "Order not found." });
+    if (String(order.driverId) !== String(req.staffUser._id)) {
+      return res.status(403).json({ error: "You are not assigned to this delivery." });
+    }
+    if (order.dispatchStatus !== "active") return res.status(400).json({ error: "This delivery is not currently active." });
+
+    order.dispatchStatus = "completed";
+    await order.save();
+
+    for (const item of order.items) {
+      await sendOrderNotification({
+        listingId: item.listingId, listingTitle: item.title, buyerName: order.buyerName, sellerName: item.sellerName,
+        text: `🚚 DELIVERY COMPLETED\nOrder: ${order.orderNumber}\nItem: ${item.quantity}x ${item.title}\n\nThe delivery driver (${order.driverName}) has marked this order as successfully delivered!`
+      });
+    }
+    
+    res.json(order);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 
 // ==========================================
 // 7. LISTINGS, CONVERSATIONS & SHIPPING ROUTES
