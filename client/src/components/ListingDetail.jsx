@@ -158,6 +158,13 @@ export default function ListingDetail({
                   <span>📍</span> <span>Origin: {listing.location}</span>
                 </div>
 
+                {/* NEW: Seller Rating Badge right under the title */}
+                {listing.sellerRatingCount > 0 && (
+                  <div className="inline-flex items-center gap-1.5 bg-yellow-50 text-yellow-800 px-3 py-1.5 rounded-lg text-xs font-bold border border-yellow-300">
+                    <span>⭐</span> <span>{listing.sellerRating} ({listing.sellerRatingCount} Reviews)</span>
+                  </div>
+                )}
+
                 {!isService && (
                   <div
                     className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold border ${
@@ -181,7 +188,6 @@ export default function ListingDetail({
 
           {!isOwner && !isService && listing.status === "active" && availableStock > 0 && (
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 mb-6 space-y-5">
-              {/* QUANTITY SELECTOR */}
               <div className="flex items-center justify-between pb-4 border-b border-slate-200">
                 <div>
                   <p className="text-sm font-bold text-slate-900">Select Quantity</p>
@@ -340,7 +346,16 @@ export default function ListingDetail({
             )}
 
             <div className="mt-4 flex items-center justify-center gap-2 text-xs text-slate-500 font-medium">
-              <span>👤 Sold by: {listing.sellerName}</span>
+              <span>👤 Sold by: <span className="font-bold text-slate-800">{listing.sellerName}</span></span>
+              {listing.sellerRatingCount > 0 ? (
+                <span className="bg-yellow-50 text-yellow-800 border border-yellow-300 px-2 py-0.5 rounded-full font-bold">
+                  ⭐ {listing.sellerRating}
+                </span>
+              ) : (
+                <span className="bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full">
+                  New Seller
+                </span>
+              )}
             </div>
           </div>
         </div>
