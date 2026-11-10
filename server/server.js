@@ -87,7 +87,9 @@ const conversationSchema = new mongoose.Schema(
     listingId: { type: String, required: true },
     listingTitle: { type: String, required: true },
     buyerName: { type: String, required: true },
-    sellerName: { type: String, required: true },
+    sellerName: { type: String, required: true }, // For Driver chats, this holds the Driver's Name
+    isDeliveryChat: { type: Boolean, default: false }, // NEW: Flags this as a Driver/Buyer chat
+    orderId: { type: String, default: null }, // NEW: Ties chat to a specific dispatch order
     messages: [
       {
         sender: { type: String, required: true },
@@ -235,7 +237,7 @@ function requireFullAdmin(req, res, next) {
 
 async function sendOrderNotification({ listingId, listingTitle, buyerName, sellerName, text }) {
   const formattedTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  let conv = await Conversation.findOne({ listingId, buyerName });
+  let conv = await Conversation.findOne({ listingId, buyerName, isDeliveryChat: false });
 
   if (!conv) {
     conv = await Conversation.create({
@@ -555,7 +557,7 @@ app.patch("/api/admin/orders/:id/verify", verifyStaff, requireFullAdmin, async (
     for (const item of order.items) {
       await sendOrderNotification({
         listingId: item.listingId, listingTitle: item.title, buyerName: order.buyerName, sellerName: item.sellerName,
-        text: `✅ PAYMENT VERIFIED BY ADMIN (${previousType})\nOrder: ${order.orderNumber}\nItem: ${item.quantity}x ${item.title}\n\n🔔 Notification to Seller (${item.sellerName}): Payment has been verified by GoGyMarket Admin. Your item is now ACTIVE and ready for delivery pickup! The Buyer can now rate this transaction.`
+        text: `✅ PAYMENT VERIFIED BY ADMIN (${previousType})\nOrder: ${order.orderNumber}\nItem: ${item.quantity}x ${item.title}\nDeliver To: ${item.buyerAddress}\n\n🔔 Notification to Seller (${item.sellerName}): Payment has been verified by GoGyMarket Admin. Your item is now ACTIVE and ready for delivery pickup!`
       });
     }
     res.json(order);
@@ -697,6 +699,23 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
     order.driverId = req.staffUser._id;
     order.driverName = req.staffUser.name;
     await order.save();
+
+    // NEW: Auto-create Delivery Chat
+    const formattedTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    await Conversation.create({
+      listingId: String(order._id),
+      listingTitle: `Delivery: Order ${order.orderNumber}`,
+      buyerName: order.buyerName,
+      sellerName: req.staffUser.name, 
+      isDeliveryChat: true,
+      orderId: String(order._id),
+      messages: [{ 
+        sender: "GoGyMarket Dispatch", 
+        text: `Driver ${req.staffUser.name} has accepted your delivery! You can message them directly in this thread.`, 
+        time: formattedTime 
+      }]
+    });
+
     res.json(order);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -715,6 +734,19 @@ app.patch("/api/driver/orders/:id/complete", verifyStaff, async (req, res) => {
 
     order.dispatchStatus = "completed";
     await order.save();
+
+    const formattedTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+    // Notify Driver/Buyer Chat
+    const deliveryConv = await Conversation.findOne({ orderId: String(order._id), isDeliveryChat: true });
+    if (deliveryConv) {
+      deliveryConv.messages.push({
+        sender: "GoGyMarket Dispatch",
+        text: `🏁 DELIVERY COMPLETED: ${req.staffUser.name} has marked this delivery as successfully dropped off!`,
+        time: formattedTime
+      });
+      await deliveryConv.save();
+    }
 
     for (const item of order.items) {
       await sendOrderNotification({
@@ -807,7 +839,7 @@ app.get("/api/conversations", async (req, res) => {
 app.post("/api/conversations", async (req, res) => {
   try {
     const { listingId, listingTitle, buyerName, sellerName, initialMessage } = req.body;
-    let conv = await Conversation.findOne({ listingId, buyerName });
+    let conv = await Conversation.findOne({ listingId, buyerName, isDeliveryChat: false });
     const formattedTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const msgText = initialMessage || `Hi ${sellerName}, is "${listingTitle}" still available?`;
 
@@ -862,22 +894,16 @@ app.delete("/api/conversations/:id", async (req, res) => {
   }
 });
 
-// NEW: Helper function to parse Google Maps Pin Drop URLs
 function formatWaypoint(inputStr) {
   if (!inputStr || typeof inputStr !== "string") return { address: "Toronto, ON" };
-
   const pinMatch = inputStr.match(/3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
   if (pinMatch) return { location: { latLng: { latitude: parseFloat(pinMatch[1]), longitude: parseFloat(pinMatch[2]) } } };
-  
   const atMatch = inputStr.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
   if (atMatch) return { location: { latLng: { latitude: parseFloat(atMatch[1]), longitude: parseFloat(atMatch[2]) } } };
-
   const qMatch = inputStr.match(/q=(-?\d+\.\d+),(-?\d+\.\d+)/);
   if (qMatch) return { location: { latLng: { latitude: parseFloat(qMatch[1]), longitude: parseFloat(qMatch[2]) } } };
-
   const rawMatch = inputStr.match(/^(-?\d+\.\d+),\s*(-?\d+\.\d+)$/);
   if (rawMatch) return { location: { latLng: { latitude: parseFloat(rawMatch[1]), longitude: parseFloat(rawMatch[2]) } } };
-
   return { address: inputStr };
 }
 
