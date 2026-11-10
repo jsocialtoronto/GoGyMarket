@@ -5,7 +5,7 @@ import PostListingForm from "./components/PostListingForm";
 import ListingDetail from "./components/ListingDetail";
 import AuthScreen from "./components/AuthScreen";
 import AdminDashboard from "./components/AdminDashboard";
-import { MARKETPLACE_CATEGORIES, LISTING_STATUSES } from "./config/categoriesConfig";
+import { MARKETPLACE_CATEGORIES } from "./config/categoriesConfig";
 
 const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:5000").replace(/\/$/, "");
 
@@ -81,7 +81,6 @@ export default function App() {
       if (convsRes.ok) {
         const convsData = await convsRes.json();
         const validConvs = Array.isArray(convsData) ? convsData : [];
-        // Privacy filter: Only keep conversations where current user is buyer or seller
         const myConvs = isStaff ? validConvs : validConvs.filter(c => c.buyerName === currentUser?.name || c.sellerName === currentUser?.name);
         setConversations(myConvs);
         if (myConvs.length > 0 && !activeConvId) setActiveConvId(myConvs[0]._id);
@@ -125,7 +124,6 @@ export default function App() {
       if (convsRes.ok) {
         const convsData = await convsRes.json();
         const validConvs = Array.isArray(convsData) ? convsData : [];
-        // Drivers only see their dispatch chats
         const myConvs = validConvs.filter(c => c.buyerName === currentUser?.name || c.sellerName === currentUser?.name);
         setConversations(myConvs);
         if (myConvs.length > 0 && !activeConvId) setActiveConvId(myConvs[0]._id);
@@ -478,7 +476,6 @@ export default function App() {
   const cartDeliveryTotal = cart.reduce((sum, item) => sum + Number(item.shippingCost || 0), 0);
   const cartGrandTotal = cartItemTotal + cartDeliveryTotal;
 
-  // NEW: Extracted Messages UI so it can be safely used by both Drivers and Users
   const renderMessagesTab = () => (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden grid grid-cols-1 md:grid-cols-3 min-h-[480px]">
       <div className="border-r border-slate-200 p-4 space-y-2 overflow-y-auto max-h-[480px]">
@@ -487,9 +484,7 @@ export default function App() {
           <p className="text-xs text-slate-400">No messages yet.</p>
         ) : (
           conversations.map((conv) => {
-            // Determine the name of the *other* person in the chat
             const otherPersonName = conv.sellerName === currentUser?.name ? conv.buyerName : conv.sellerName;
-            
             return (
               <div key={conv._id} onClick={() => setActiveConvId(conv._id)} className={`p-3 rounded-lg cursor-pointer border transition-colors ${activeConvId === conv._id ? "bg-emerald-50 border-emerald-300" : "border-slate-200 hover:bg-slate-50"}`}>
                 <div className="flex justify-between items-start text-xs font-bold text-slate-800">
@@ -550,6 +545,14 @@ export default function App() {
           localStorage.setItem("gogy_user", JSON.stringify(user));
           localStorage.setItem("gogy_token", token);
           setCurrentUser(user);
+          // NEW: Auto-route the user to their designated tab the moment they log in
+          if (user.role === "driver") {
+            setActiveTab("driver");
+          } else if (user.role === "admin" || user.role === "viewer") {
+            setActiveTab("admin");
+          } else {
+            setActiveTab("search");
+          }
         }}
       />
     );
@@ -660,8 +663,6 @@ export default function App() {
               )}
             </div>
           )}
-
-          {/* Driver Messages Tab */}
           {activeTab === "messages" && renderMessagesTab()}
         </>
 
