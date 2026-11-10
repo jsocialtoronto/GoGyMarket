@@ -5,12 +5,11 @@ import PostListingForm from "./components/PostListingForm";
 import ListingDetail from "./components/ListingDetail";
 import AuthScreen from "./components/AuthScreen";
 import AdminDashboard from "./components/AdminDashboard";
-import { MARKETPLACE_CATEGORIES } from "./config/categoriesConfig";
+import { MARKETPLACE_CATEGORIES, LISTING_STATUSES } from "./config/categoriesConfig";
 
 const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:5000").replace(/\/$/, "");
 
 export default function App() {
-  // CRASH-PROOF: Added try-catch blocks to all local storage parsers
   const [currentUser, setCurrentUser] = useState(() => {
     try {
       const saved = localStorage.getItem("gogy_user");
@@ -82,8 +81,10 @@ export default function App() {
       if (convsRes.ok) {
         const convsData = await convsRes.json();
         const validConvs = Array.isArray(convsData) ? convsData : [];
-        setConversations(validConvs);
-        if (validConvs.length > 0 && !activeConvId) setActiveConvId(validConvs[0]._id);
+        // Privacy filter: Only keep conversations where current user is buyer or seller
+        const myConvs = isStaff ? validConvs : validConvs.filter(c => c.buyerName === currentUser?.name || c.sellerName === currentUser?.name);
+        setConversations(myConvs);
+        if (myConvs.length > 0 && !activeConvId) setActiveConvId(myConvs[0]._id);
       }
 
       if (currentUser && !isStaff && !isDriver) {
@@ -109,15 +110,30 @@ export default function App() {
 
   const loadDriverData = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/driver/orders`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem("gogy_token")}` }
-      });
-      if (res.ok) {
-        const dData = await res.json();
+      setIsLoading(true);
+      const [ordersRes, convsRes] = await Promise.all([
+        fetch(`${API_BASE}/api/driver/orders`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem("gogy_token")}` }
+        }),
+        fetch(`${API_BASE}/api/conversations`)
+      ]);
+
+      if (ordersRes.ok) {
+        const dData = await ordersRes.json();
         setDriverOrders(Array.isArray(dData) ? dData : []);
+      }
+      if (convsRes.ok) {
+        const convsData = await convsRes.json();
+        const validConvs = Array.isArray(convsData) ? convsData : [];
+        // Drivers only see their dispatch chats
+        const myConvs = validConvs.filter(c => c.buyerName === currentUser?.name || c.sellerName === currentUser?.name);
+        setConversations(myConvs);
+        if (myConvs.length > 0 && !activeConvId) setActiveConvId(myConvs[0]._id);
       }
     } catch (err) {
       console.error("Error loading driver data:", err);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -438,7 +454,6 @@ export default function App() {
     }
   };
 
-  // Safe filter logic to prevent crashes if listings is empty or malformed
   const filteredListings = useMemo(() => {
     return (listings || []).filter((item) => {
       if (!item) return false;
@@ -462,6 +477,71 @@ export default function App() {
   const cartItemTotal = cart.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
   const cartDeliveryTotal = cart.reduce((sum, item) => sum + Number(item.shippingCost || 0), 0);
   const cartGrandTotal = cartItemTotal + cartDeliveryTotal;
+
+  // NEW: Extracted Messages UI so it can be safely used by both Drivers and Users
+  const renderMessagesTab = () => (
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden grid grid-cols-1 md:grid-cols-3 min-h-[480px]">
+      <div className="border-r border-slate-200 p-4 space-y-2 overflow-y-auto max-h-[480px]">
+        <h2 className="font-bold text-sm uppercase tracking-wider text-slate-500 mb-3">Conversations</h2>
+        {conversations.length === 0 ? (
+          <p className="text-xs text-slate-400">No messages yet.</p>
+        ) : (
+          conversations.map((conv) => {
+            // Determine the name of the *other* person in the chat
+            const otherPersonName = conv.sellerName === currentUser?.name ? conv.buyerName : conv.sellerName;
+            
+            return (
+              <div key={conv._id} onClick={() => setActiveConvId(conv._id)} className={`p-3 rounded-lg cursor-pointer border transition-colors ${activeConvId === conv._id ? "bg-emerald-50 border-emerald-300" : "border-slate-200 hover:bg-slate-50"}`}>
+                <div className="flex justify-between items-start text-xs font-bold text-slate-800">
+                  <div className="flex-1">
+                    <span>{otherPersonName}</span>
+                    {conv.isDeliveryChat && <span className="ml-2 text-[9px] bg-blue-100 text-blue-800 border border-blue-200 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Dispatch</span>}
+                    <p className="text-xs text-slate-600 font-medium truncate mt-0.5">{conv.listingTitle}</p>
+                  </div>
+                  <button onClick={(e) => handleDeleteConversation(e, conv._id)} className="ml-2 text-slate-300 hover:text-red-500 transition-colors" title="Delete Thread">🗑️</button>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+      
+      <div className="md:col-span-2 flex flex-col justify-between p-4 bg-slate-50">
+        {activeConversation ? (
+          <>
+            <div className="space-y-4 overflow-y-auto max-h-80 pr-2">
+              {(activeConversation.messages || []).map((m, idx) => {
+                const isMe = m.sender === currentUser?.name;
+                const isAdminMsg = m.sender === "GoGyMarket Admin" || m.sender === "GoGyMarket Dispatch";
+                return (
+                  <div key={m._id || idx} className={`flex flex-col ${isAdminMsg ? "items-center" : isMe ? "items-end" : "items-start"}`}>
+                    <div className="flex items-center gap-2">
+                      {isMe && !isAdminMsg && m._id && (
+                        <button onClick={() => handleDeleteMessage(activeConversation._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
+                      )}
+                      <div className={`px-4 py-2.5 rounded-xl text-sm max-w-md whitespace-pre-wrap ${isAdminMsg ? "bg-amber-50 border border-amber-300 text-amber-950 font-medium" : isMe ? "bg-emerald-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
+                        {m.text}
+                      </div>
+                      {!isMe && !isAdminMsg && m._id && (
+                        <button onClick={() => handleDeleteMessage(activeConversation._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-slate-400 mt-1 px-1">{m.sender} • {m.time}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <form onSubmit={handleSendReply} className="mt-4 flex gap-2">
+              <input type="text" placeholder="Write a message..." value={replyText} onChange={(e) => setReplyText(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-emerald-500" />
+              <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors">Send</button>
+            </form>
+          </>
+        ) : (
+          <div className="m-auto text-center text-slate-400 text-sm">Select a conversation on the left to view messages.</div>
+        )}
+      </div>
+    </div>
+  );
 
   if (!currentUser) {
     return (
@@ -490,95 +570,100 @@ export default function App() {
     >
       {/* 1. STRICT DRIVER PORTAL RENDERING */}
       {isDriver ? (
-        activeTab === "driver" && (
-          <div className="max-w-4xl mx-auto space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-2xl font-bold text-slate-900">Driver Delivery Portal</h2>
-                <p className="text-xs text-slate-500">View and accept pending delivery requests.</p>
+        <>
+          {activeTab === "driver" && (
+            <div className="max-w-4xl mx-auto space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">Driver Delivery Portal</h2>
+                  <p className="text-xs text-slate-500">View and accept pending delivery requests.</p>
+                </div>
+                <button onClick={loadDriverData} className="text-xs font-bold text-emerald-700 hover:underline">
+                  ↻ Refresh Requests
+                </button>
               </div>
-              <button onClick={loadDriverData} className="text-xs font-bold text-emerald-700 hover:underline">
-                ↻ Refresh Requests
-              </button>
-            </div>
-            
-            {driverOrders.length === 0 ? (
-              <div className="bg-white p-12 rounded-xl border border-slate-200 text-center text-slate-500">
-                No active or pending delivery requests at the moment.
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {driverOrders.map((order) => (
-                  <div key={order._id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                    <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-                      <div>
-                        <span className="font-black text-slate-900">{order.orderNumber}</span>
-                        <span className={`ml-3 text-[11px] font-bold px-2.5 py-1 rounded-full ${
-                          order.dispatchStatus === 'pending' ? 'bg-amber-100 text-amber-800' : 
-                          order.dispatchStatus === 'active' ? 'bg-blue-100 text-blue-800' :
-                          'bg-emerald-100 text-emerald-800'
-                        }`}>
-                          {order.dispatchStatus === 'pending' ? '⏳ Pending Dispatch' : 
-                           order.dispatchStatus === 'active' ? '🚚 Active (In Transit)' :
-                           '✅ Completed'}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-500">Placed: {new Date(order.createdAt).toLocaleString()}</p>
-                    </div>
-                    
-                    {order.items.filter(i => i.deliveryMethod === 'delivery').map((item, idx) => (
-                      <div key={idx} className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
-                        <p className="font-bold text-slate-900 text-sm">{item.quantity}x {item.title}</p>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                          <div className="bg-white p-3 rounded border border-slate-200">
-                            <p className="font-bold text-slate-500 uppercase mb-1">Pickup From (Seller)</p>
-                            <p className="font-semibold text-slate-800">{item.sellerName}</p>
-                            <p className="text-slate-600">{item.sellerLocation}</p>
-                          </div>
-                          
-                          <div className="bg-white p-3 rounded border border-slate-200">
-                            <p className="font-bold text-slate-500 uppercase mb-1">Deliver To (Buyer)</p>
-                            <p className="font-semibold text-slate-800">{order.buyerName} ({order.buyerContact})</p>
-                            {item.buyerLocationType === 'pin' ? (
-                              <a href={item.buyerPin} target="_blank" rel="noreferrer" className="text-blue-600 underline font-semibold break-all">📍 View Pin Drop Location</a>
-                            ) : (
-                              <p className="text-slate-600">{item.buyerAddress}</p>
-                            )}
-                          </div>
+              
+              {driverOrders.length === 0 ? (
+                <div className="bg-white p-12 rounded-xl border border-slate-200 text-center text-slate-500">
+                  No active or pending delivery requests at the moment.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {driverOrders.map((order) => (
+                    <div key={order._id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                      <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                        <div>
+                          <span className="font-black text-slate-900">{order.orderNumber}</span>
+                          <span className={`ml-3 text-[11px] font-bold px-2.5 py-1 rounded-full ${
+                            order.dispatchStatus === 'pending' ? 'bg-amber-100 text-amber-800' : 
+                            order.dispatchStatus === 'active' ? 'bg-blue-100 text-blue-800' :
+                            'bg-emerald-100 text-emerald-800'
+                          }`}>
+                            {order.dispatchStatus === 'pending' ? '⏳ Pending Dispatch' : 
+                             order.dispatchStatus === 'active' ? '🚚 Active (In Transit)' :
+                             '✅ Completed'}
+                          </span>
                         </div>
-
-                        {item.specialInstructions && (
-                          <div className="mt-2 bg-amber-50 p-3 rounded-lg border border-amber-200 text-xs">
-                            <span className="font-bold text-amber-800">Special Instructions: </span>
-                            <span className="text-amber-900">{item.specialInstructions}</span>
-                          </div>
-                        )}
+                        <p className="text-xs text-slate-500">Placed: {new Date(order.createdAt).toLocaleString()}</p>
                       </div>
-                    ))}
+                      
+                      {order.items.filter(i => i.deliveryMethod === 'delivery').map((item, idx) => (
+                        <div key={idx} className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
+                          <p className="font-bold text-slate-900 text-sm">{item.quantity}x {item.title}</p>
+                          
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                            <div className="bg-white p-3 rounded border border-slate-200">
+                              <p className="font-bold text-slate-500 uppercase mb-1">Pickup From (Seller)</p>
+                              <p className="font-semibold text-slate-800">{item.sellerName}</p>
+                              <p className="text-slate-600">{item.sellerLocation}</p>
+                            </div>
+                            
+                            <div className="bg-white p-3 rounded border border-slate-200">
+                              <p className="font-bold text-slate-500 uppercase mb-1">Deliver To (Buyer)</p>
+                              <p className="font-semibold text-slate-800">{order.buyerName} ({order.buyerContact})</p>
+                              {item.buyerLocationType === 'pin' ? (
+                                <a href={item.buyerPin} target="_blank" rel="noreferrer" className="text-blue-600 underline font-semibold break-all">📍 View Pin Drop Location</a>
+                              ) : (
+                                <p className="text-slate-600">{item.buyerAddress}</p>
+                              )}
+                            </div>
+                          </div>
 
-                    {order.dispatchStatus === 'pending' && (
-                      <button 
-                        onClick={() => handleAcceptDelivery(order._id)}
-                        className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-lg shadow-md transition-colors mt-2"
-                      >
-                        Accept Delivery Request
-                      </button>
-                    )}
-                    {order.dispatchStatus === 'active' && (
-                      <button 
-                        onClick={() => handleCompleteDelivery(order._id)}
-                        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-md transition-colors mt-2"
-                      >
-                        ✓ Mark Delivery as Completed
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )
+                          {item.specialInstructions && (
+                            <div className="mt-2 bg-amber-50 p-3 rounded-lg border border-amber-200 text-xs">
+                              <span className="font-bold text-amber-800">Special Instructions: </span>
+                              <span className="text-amber-900">{item.specialInstructions}</span>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+
+                      {order.dispatchStatus === 'pending' && (
+                        <button 
+                          onClick={() => handleAcceptDelivery(order._id)}
+                          className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-lg shadow-md transition-colors mt-2"
+                        >
+                          Accept Delivery Request
+                        </button>
+                      )}
+                      {order.dispatchStatus === 'active' && (
+                        <button 
+                          onClick={() => handleCompleteDelivery(order._id)}
+                          className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-md transition-colors mt-2"
+                        >
+                          ✓ Mark Delivery as Completed
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Driver Messages Tab */}
+          {activeTab === "messages" && renderMessagesTab()}
+        </>
 
       /* 2. STRICT ADMIN PORTAL RENDERING */
       ) : isStaff ? (
@@ -689,12 +774,6 @@ export default function App() {
                 {isLoading ? (
                   <div className="bg-white p-10 rounded-xl border border-slate-200 text-center text-slate-500 text-sm">
                     Loading live listings from MongoDB...
-                  </div>
-                ) : filteredListings.length === 0 ? (
-                  <div className="bg-white p-10 rounded-xl border border-slate-200 text-center space-y-3">
-                    <p className="text-slate-600 text-sm font-medium">
-                      No active listings match this search.
-                    </p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1016,63 +1095,8 @@ export default function App() {
             </div>
           )}
 
-          {activeTab === "messages" && (
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden grid grid-cols-1 md:grid-cols-3 min-h-[480px]">
-              <div className="border-r border-slate-200 p-4 space-y-2 overflow-y-auto max-h-[480px]">
-                <h2 className="font-bold text-sm uppercase tracking-wider text-slate-500 mb-3">Conversations</h2>
-                {conversations.length === 0 ? (
-                  <p className="text-xs text-slate-400">No messages yet.</p>
-                ) : (
-                  conversations.map((conv) => (
-                    <div key={conv._id} onClick={() => setActiveConvId(conv._id)} className={`p-3 rounded-lg cursor-pointer border transition-colors ${activeConvId === conv._id ? "bg-emerald-50 border-emerald-300" : "border-slate-200 hover:bg-slate-50"}`}>
-                      <div className="flex justify-between items-start text-xs font-bold text-slate-800">
-                        <div className="flex-1">
-                          <span>{conv.sellerName}</span>
-                          <p className="text-xs text-slate-600 font-medium truncate mt-0.5">{conv.listingTitle}</p>
-                        </div>
-                        <button onClick={(e) => handleDeleteConversation(e, conv._id)} className="ml-2 text-slate-300 hover:text-red-500 transition-colors" title="Delete Thread">🗑️</button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-              
-              <div className="md:col-span-2 flex flex-col justify-between p-4 bg-slate-50">
-                {activeConversation ? (
-                  <>
-                    <div className="space-y-4 overflow-y-auto max-h-80 pr-2">
-                      {(activeConversation.messages || []).map((m, idx) => {
-                        const isMe = m.sender === currentUser.name;
-                        const isAdminMsg = m.sender === "GoGyMarket Admin";
-                        return (
-                          <div key={m._id || idx} className={`flex flex-col ${isAdminMsg ? "items-center" : isMe ? "items-end" : "items-start"}`}>
-                            <div className="flex items-center gap-2">
-                              {isMe && !isAdminMsg && m._id && (
-                                <button onClick={() => handleDeleteMessage(activeConversation._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
-                              )}
-                              <div className={`px-4 py-2.5 rounded-xl text-sm max-w-md whitespace-pre-wrap ${isAdminMsg ? "bg-amber-50 border border-amber-300 text-amber-950 font-medium" : isMe ? "bg-emerald-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
-                                {m.text}
-                              </div>
-                              {!isMe && !isAdminMsg && m._id && (
-                                <button onClick={() => handleDeleteMessage(activeConversation._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
-                              )}
-                            </div>
-                            <span className="text-[10px] text-slate-400 mt-1 px-1">{m.sender} • {m.time}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <form onSubmit={handleSendReply} className="mt-4 flex gap-2">
-                      <input type="text" placeholder="Write a message..." value={replyText} onChange={(e) => setReplyText(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-emerald-500" />
-                      <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors">Send</button>
-                    </form>
-                  </>
-                ) : (
-                  <div className="m-auto text-center text-slate-400 text-sm">Select a conversation on the left to view messages.</div>
-                )}
-              </div>
-            </div>
-          )}
+          {/* User Messages Tab */}
+          {activeTab === "messages" && renderMessagesTab()}
 
           {activeTab === "post" && (
             <PostListingForm
