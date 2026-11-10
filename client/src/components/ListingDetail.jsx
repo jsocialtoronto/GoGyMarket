@@ -6,6 +6,7 @@ const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:5000").repla
 
 export default function ListingDetail({
   listing,
+  cart = [], // NEW: Accept cart to check stock limits
   onClose,
   onMessageSeller,
   onAddToCart,
@@ -18,14 +19,22 @@ export default function ListingDetail({
   const [quantity, setQuantity] = useState(1);
 
   const [deliveryMethod, setDeliveryMethod] = useState("pickup");
+  
+  // NEW: Advanced Delivery Location & Instructions States
+  const [buyerLocationType, setBuyerLocationType] = useState("address"); // 'address' | 'pin'
   const [buyerAddress, setBuyerAddress] = useState(currentUser?.location || "");
+  const [buyerPin, setBuyerPin] = useState("");
+  const [specialInstructions, setSpecialInstructions] = useState("");
 
   const [shippingCost, setShippingCost] = useState(null);
   const [shippingDistance, setShippingDistance] = useState(null);
   const [isCalculating, setIsCalculating] = useState(false);
   const [calcError, setCalcError] = useState("");
 
+  // STOCK CALCULATION LOGIC (Prevents over-adding)
   const availableStock = listing.stockCount != null ? Number(listing.stockCount) : 1;
+  const qtyInCart = cart.filter(item => item._id === listing._id).reduce((sum, item) => sum + item.quantity, 0);
+  const remainingStockForUser = Math.max(0, availableStock - qtyInCart);
 
   useEffect(() => {
     setMainImageIndex(0);
@@ -35,6 +44,13 @@ export default function ListingDetail({
     setCalcError("");
   }, [listing._id]);
 
+  // Ensure selected quantity never exceeds remaining available stock
+  useEffect(() => {
+    if (quantity > remainingStockForUser && remainingStockForUser > 0) {
+      setQuantity(remainingStockForUser);
+    }
+  }, [remainingStockForUser, quantity]);
+
   const images = listing.images?.length > 0
     ? listing.images
     : ["https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&auto=format&fit=crop&q=80"];
@@ -43,8 +59,10 @@ export default function ListingDetail({
   const isService = listing.category === "Services";
 
   const handleCalculateShipping = async () => {
-    if (!buyerAddress.trim()) {
-      setCalcError("Please enter your full delivery address.");
+    const destination = buyerLocationType === "pin" ? buyerPin : buyerAddress;
+    
+    if (!destination.trim()) {
+      setCalcError(`Please enter a ${buyerLocationType === "pin" ? "Pin Drop URL" : "delivery address"}.`);
       return;
     }
 
@@ -57,7 +75,7 @@ export default function ListingDetail({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           origin: `${listing.location}, Canada`,
-          destination: `${buyerAddress.trim()}, Canada`
+          destination: buyerLocationType === "pin" ? destination : `${destination}, Canada`
         })
       });
       const data = await res.json();
@@ -87,7 +105,10 @@ export default function ListingDetail({
       unitPrice,
       itemSubtotal,
       deliveryMethod,
-      buyerAddress: deliveryMethod === "delivery" ? buyerAddress : "Local Pickup",
+      buyerLocationType: deliveryMethod === "delivery" ? buyerLocationType : "address",
+      buyerAddress: deliveryMethod === "delivery" && buyerLocationType === "address" ? buyerAddress : "Local Pickup",
+      buyerPin: deliveryMethod === "delivery" && buyerLocationType === "pin" ? buyerPin : "",
+      specialInstructions: deliveryMethod === "delivery" ? specialInstructions : "",
       shippingCost: deliveryMethod === "delivery" ? Number(shippingCost || 0) : 0,
       totalCost
     };
@@ -158,7 +179,6 @@ export default function ListingDetail({
                   <span>📍</span> <span>Origin: {listing.location}</span>
                 </div>
 
-                {/* NEW: Seller Rating Badge right under the title */}
                 {listing.sellerRatingCount > 0 && (
                   <div className="inline-flex items-center gap-1.5 bg-yellow-50 text-yellow-800 px-3 py-1.5 rounded-lg text-xs font-bold border border-yellow-300">
                     <span>⭐</span> <span>{listing.sellerRating} ({listing.sellerRatingCount} Reviews)</span>
@@ -186,12 +206,12 @@ export default function ListingDetail({
             </button>
           </div>
 
-          {!isOwner && !isService && listing.status === "active" && availableStock > 0 && (
+          {!isOwner && !isService && listing.status === "active" && remainingStockForUser > 0 && (
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 mb-6 space-y-5">
               <div className="flex items-center justify-between pb-4 border-b border-slate-200">
                 <div>
                   <p className="text-sm font-bold text-slate-900">Select Quantity</p>
-                  <p className="text-xs text-slate-500">Max available: {availableStock}</p>
+                  <p className="text-xs text-slate-500">Max available to add: {remainingStockForUser}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -204,7 +224,7 @@ export default function ListingDetail({
                   <span className="w-10 text-center font-bold text-sm">{quantity}</span>
                   <button
                     type="button"
-                    onClick={() => setQuantity((q) => Math.min(availableStock, q + 1))}
+                    onClick={() => setQuantity((q) => Math.min(remainingStockForUser, q + 1))}
                     className="w-8 h-8 rounded-lg border border-slate-300 bg-white font-bold text-slate-700 hover:bg-slate-100"
                   >
                     +
@@ -255,35 +275,75 @@ export default function ListingDetail({
                     <div className="flex-1">
                       <p className="font-bold text-slate-900 text-sm">Delivery ($20 GYD / km)</p>
                       <p className="text-xs text-slate-500 font-medium">
-                        Choose Cash Lockbox, eTransfer, or Credit at Checkout
+                        Dispatch a driver to your location.
                       </p>
                     </div>
                   </label>
                 </div>
 
                 {deliveryMethod === "delivery" && (
-                  <div className="mt-4 pt-4 border-t border-slate-200 space-y-3">
-                    <label className="block text-xs font-bold text-slate-700">
-                      Enter your full street address & city:
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        placeholder="e.g. 15 Eastdale Avenue, Toronto"
-                        value={buyerAddress}
-                        onChange={(e) => {
-                          setBuyerAddress(e.target.value);
-                          setShippingCost(null);
-                        }}
-                        className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                  <div className="mt-4 pt-4 border-t border-slate-200 space-y-4">
+                    
+                    <div>
+                      <div className="flex gap-4 mb-2">
+                        <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                          <input 
+                            type="radio" 
+                            name="locationTypeToggle"
+                            checked={buyerLocationType === 'address'} 
+                            onChange={() => { setBuyerLocationType('address'); setShippingCost(null); }}
+                            className="text-emerald-600"
+                          /> Street Address
+                        </label>
+                        <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                          <input 
+                            type="radio" 
+                            name="locationTypeToggle"
+                            checked={buyerLocationType === 'pin'} 
+                            onChange={() => { setBuyerLocationType('pin'); setShippingCost(null); }}
+                            className="text-emerald-600"
+                          /> Pin Drop URL
+                        </label>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        {buyerLocationType === 'address' ? (
+                          <input
+                            type="text"
+                            placeholder="e.g. 15 Eastdale Avenue, Toronto"
+                            value={buyerAddress}
+                            onChange={(e) => { setBuyerAddress(e.target.value); setShippingCost(null); }}
+                            className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                          />
+                        ) : (
+                          <input
+                            type="text"
+                            placeholder="Paste Google Maps Pin URL here..."
+                            value={buyerPin}
+                            onChange={(e) => { setBuyerPin(e.target.value); setShippingCost(null); }}
+                            className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                          />
+                        )}
+                        <button
+                          onClick={handleCalculateShipping}
+                          disabled={isCalculating || (buyerLocationType === 'address' ? !buyerAddress.trim() : !buyerPin.trim())}
+                          className="bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm"
+                        >
+                          {isCalculating ? "..." : "Calculate"}
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-1">If your Pin Drop URL fails to calculate, try an address.</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Driver Instructions (Optional)</label>
+                      <textarea
+                        rows="2"
+                        placeholder="e.g. Call when outside, leave at side door..."
+                        value={specialInstructions}
+                        onChange={(e) => setSpecialInstructions(e.target.value)}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
                       />
-                      <button
-                        onClick={handleCalculateShipping}
-                        disabled={isCalculating || !buyerAddress.trim()}
-                        className="bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm"
-                      >
-                        {isCalculating ? "..." : "Calculate"}
-                      </button>
                     </div>
 
                     {calcError && <p className="text-xs text-red-600 font-semibold mt-1">⚠️ {calcError}</p>}
@@ -307,7 +367,7 @@ export default function ListingDetail({
           )}
 
           <div className="mt-auto bg-slate-50 border border-slate-200 p-5 rounded-xl">
-            {!isOwner && listing.status === "active" && availableStock > 0 && (
+            {!isOwner && listing.status === "active" && remainingStockForUser > 0 && (
               <div className="flex justify-between items-center mb-4">
                 <span className="text-sm font-bold text-slate-600">
                   Total ({quantity}x Item + {deliveryMethod === "pickup" ? "Pickup" : "Delivery"})
@@ -323,6 +383,11 @@ export default function ListingDetail({
             ) : listing.status !== "active" || availableStock <= 0 ? (
               <div className="bg-slate-200 border border-slate-300 text-slate-600 text-sm font-bold px-4 py-3 rounded-lg text-center">
                 Out of Stock / Sold Out
+              </div>
+            ) : remainingStockForUser <= 0 ? (
+              <div className="bg-slate-200 border border-slate-300 text-slate-600 text-sm font-bold px-4 py-3 rounded-lg text-center flex flex-col items-center">
+                <span>🛒 You have all available stock ({qtyInCart}) in your cart.</span>
+                <span className="text-xs mt-1">Complete your purchase to secure these items!</span>
               </div>
             ) : (
               <div className="flex flex-col gap-3">
