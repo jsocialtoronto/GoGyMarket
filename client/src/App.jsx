@@ -5,14 +5,17 @@ import PostListingForm from "./components/PostListingForm";
 import ListingDetail from "./components/ListingDetail";
 import AuthScreen from "./components/AuthScreen";
 import AdminDashboard from "./components/AdminDashboard";
-import { MARKETPLACE_CATEGORIES, LISTING_STATUSES } from "./config/categoriesConfig";
+import { MARKETPLACE_CATEGORIES } from "./config/categoriesConfig";
 
 const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:5000").replace(/\/$/, "");
 
 export default function App() {
+  // CRASH-PROOF: Added try-catch blocks to all local storage parsers
   const [currentUser, setCurrentUser] = useState(() => {
-    const saved = localStorage.getItem("gogy_user");
-    return saved ? JSON.parse(saved) : null;
+    try {
+      const saved = localStorage.getItem("gogy_user");
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) { return null; }
   });
 
   const isStaff = currentUser?.role === "admin" || currentUser?.role === "viewer";
@@ -24,13 +27,19 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
 
   const [favouriteIds, setFavouriteIds] = useState(() => {
-    const saved = localStorage.getItem("gogy_favs");
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem("gogy_favs");
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) { return []; }
   });
 
   const [cart, setCart] = useState(() => {
-    const saved = localStorage.getItem("gogy_cart");
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem("gogy_cart");
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) { return []; }
   });
 
   const [deliveryPaymentMethod, setDeliveryPaymentMethod] = useState("cash");
@@ -68,12 +77,13 @@ export default function App() {
 
       if (listingsRes.ok) {
         const listingsData = await listingsRes.json();
-        setListings(listingsData);
+        setListings(Array.isArray(listingsData) ? listingsData : []);
       }
       if (convsRes.ok) {
         const convsData = await convsRes.json();
-        setConversations(convsData);
-        if (convsData.length > 0 && !activeConvId) setActiveConvId(convsData[0]._id);
+        const validConvs = Array.isArray(convsData) ? convsData : [];
+        setConversations(validConvs);
+        if (validConvs.length > 0 && !activeConvId) setActiveConvId(validConvs[0]._id);
       }
 
       if (currentUser && !isStaff && !isDriver) {
@@ -81,8 +91,14 @@ export default function App() {
           fetch(`${API_BASE}/api/orders/user/${currentUser.id}`),
           fetch(`${API_BASE}/api/ratings`)
         ]);
-        if (ordersRes.ok) setMyOrders(await ordersRes.json());
-        if (ratingsRes.ok) setAllRatings(await ratingsRes.json());
+        if (ordersRes.ok) {
+          const oData = await ordersRes.json();
+          setMyOrders(Array.isArray(oData) ? oData : []);
+        }
+        if (ratingsRes.ok) {
+          const rData = await ratingsRes.json();
+          setAllRatings(Array.isArray(rData) ? rData : []);
+        }
       }
     } catch (err) {
       console.error("Error loading data from Render:", err);
@@ -96,7 +112,10 @@ export default function App() {
       const res = await fetch(`${API_BASE}/api/driver/orders`, {
         headers: { Authorization: `Bearer ${localStorage.getItem("gogy_token")}` }
       });
-      if (res.ok) setDriverOrders(await res.json());
+      if (res.ok) {
+        const dData = await res.json();
+        setDriverOrders(Array.isArray(dData) ? dData : []);
+      }
     } catch (err) {
       console.error("Error loading driver data:", err);
     }
@@ -127,6 +146,7 @@ export default function App() {
   }, [activeTab]);
 
   const formatPrice = (item) => {
+    if (!item) return "$0 GYD";
     if (item.pricingType === "free") return "FREE";
     if (item.pricingType === "contact_for_quote") return "Contact for Quote";
     if (item.pricingType === "hourly") return `$${Number(item.price || 0).toLocaleString()} GYD/hr`;
@@ -214,7 +234,7 @@ export default function App() {
           buyerContact: currentUser.email || currentUser.phone || "N/A",
           paymentMethod: paymentMethodCode,
           paymentOptionLabel: chosenMethodLabel,
-          items: cart, // Contains buyerLocationType, buyerPin, specialInstructions already mapped in ListingDetail
+          items: cart,
           itemSubtotal: cartItemTotal,
           deliveryTotal: cartDeliveryTotal,
           grandTotal: cartGrandTotal,
@@ -418,6 +438,27 @@ export default function App() {
     }
   };
 
+  // Safe filter logic to prevent crashes if listings is empty or malformed
+  const filteredListings = useMemo(() => {
+    return (listings || []).filter((item) => {
+      if (!item) return false;
+      const stock = item.stockCount != null ? Number(item.stockCount) : 1;
+      if (item.status === "sold" || stock <= 0) return false;
+
+      const matchesKeyword =
+        !searchQuery ||
+        (item.title && item.title.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (item.description && item.description.toLowerCase().includes(searchQuery.toLowerCase()));
+      const matchesCat = !selectedCat || item.category === selectedCat;
+      const matchesSub = !selectedSubcat || item.subcategory === selectedSubcat;
+      return matchesKeyword && matchesCat && matchesSub;
+    });
+  }, [listings, searchQuery, selectedCat, selectedSubcat]);
+
+  const myListings = (listings || []).filter((item) => item?.sellerId === currentUser?.id);
+  const favouriteListings = (listings || []).filter((item) => favouriteIds.includes(item?._id));
+  const activeConversation = conversations.find((c) => c._id === activeConvId);
+
   const cartItemTotal = cart.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
   const cartDeliveryTotal = cart.reduce((sum, item) => sum + Number(item.shippingCost || 0), 0);
   const cartGrandTotal = cartItemTotal + cartDeliveryTotal;
@@ -441,8 +482,8 @@ export default function App() {
       currentUser={currentUser}
       counts={{
         unreadMessages: conversations.length,
-        myListings: listings.filter(i => i.sellerId === currentUser?.id).length,
-        favourites: favouriteIds.length,
+        myListings: myListings.length,
+        favourites: favouriteListings.length,
         cart: cart.reduce((sum, i) => sum + Number(i.quantity || 1), 0),
         orders: myOrders.length
       }}
@@ -649,16 +690,15 @@ export default function App() {
                   <div className="bg-white p-10 rounded-xl border border-slate-200 text-center text-slate-500 text-sm">
                     Loading live listings from MongoDB...
                   </div>
+                ) : filteredListings.length === 0 ? (
+                  <div className="bg-white p-10 rounded-xl border border-slate-200 text-center space-y-3">
+                    <p className="text-slate-600 text-sm font-medium">
+                      No active listings match this search.
+                    </p>
+                  </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {listings.filter((item) => {
-                      const stock = item.stockCount != null ? Number(item.stockCount) : 1;
-                      if (item.status === "sold" || stock <= 0) return false;
-                      const matchesKeyword = !searchQuery || item.title.toLowerCase().includes(searchQuery.toLowerCase()) || item.description.toLowerCase().includes(searchQuery.toLowerCase());
-                      const matchesCat = !selectedCat || item.category === selectedCat;
-                      const matchesSub = !selectedSubcat || item.subcategory === selectedSubcat;
-                      return matchesKeyword && matchesCat && matchesSub;
-                    }).map((item) => {
+                    {filteredListings.map((item) => {
                       const isFav = favouriteIds.includes(item._id);
                       const stock = item.stockCount != null ? Number(item.stockCount) : 1;
                       const isService = item.category === "Services";
@@ -1001,13 +1041,13 @@ export default function App() {
                 {activeConversation ? (
                   <>
                     <div className="space-y-4 overflow-y-auto max-h-80 pr-2">
-                      {activeConversation.messages.map((m, idx) => {
+                      {(activeConversation.messages || []).map((m, idx) => {
                         const isMe = m.sender === currentUser.name;
                         const isAdminMsg = m.sender === "GoGyMarket Admin";
                         return (
                           <div key={m._id || idx} className={`flex flex-col ${isAdminMsg ? "items-center" : isMe ? "items-end" : "items-start"}`}>
                             <div className="flex items-center gap-2">
-                              {isMe && !isAdminMsg && (
+                              {isMe && !isAdminMsg && m._id && (
                                 <button onClick={() => handleDeleteMessage(activeConversation._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
                               )}
                               <div className={`px-4 py-2.5 rounded-xl text-sm max-w-md whitespace-pre-wrap ${isAdminMsg ? "bg-amber-50 border border-amber-300 text-amber-950 font-medium" : isMe ? "bg-emerald-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
@@ -1059,7 +1099,10 @@ export default function App() {
                   myListings.map((item) => {
                     const stock = item.stockCount != null ? Number(item.stockCount) : 1;
                     const isSoldOut = item.status === "sold" || stock <= 0;
-                    const statusMeta = isSoldOut ? LISTING_STATUSES.sold : LISTING_STATUSES[item.status] || LISTING_STATUSES.active;
+                    
+                    let badgeClass = "bg-emerald-100 text-emerald-800 border-emerald-300";
+                    if (isSoldOut) badgeClass = "bg-red-100 text-red-800 border-red-300";
+                    else if (item.status === "pending") badgeClass = "bg-amber-100 text-amber-800 border-amber-300";
 
                     return (
                       <div key={item._id} onClick={() => setSelectedListing(item)} className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 cursor-pointer hover:border-emerald-300">
@@ -1067,7 +1110,7 @@ export default function App() {
                           <img src={item.images?.[0]} alt={item.title} className="w-20 h-20 rounded-lg object-cover border" />
                           <div>
                             <div className="flex items-center gap-2">
-                              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${statusMeta.badgeClass}`}>
+                              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${badgeClass}`}>
                                 {isSoldOut ? "Sold Out (0 Left)" : `Active • ${stock} in stock`}
                               </span>
                               {stock === 1 && !isSoldOut && <span className="text-[11px] font-black text-red-600">🔥 Only 1 Left!</span>}
