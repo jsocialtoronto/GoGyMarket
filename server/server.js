@@ -675,7 +675,6 @@ app.get("/api/driver/orders", verifyStaff, async (req, res) => {
       status: { $ne: "cancelled" }
     }).sort({ createdAt: -1 });
 
-    // Drivers only see pending requests from everyone, plus their own active/completed deliveries
     const filteredOrders = req.staffUser.role === "admin" 
       ? orders 
       : orders.filter(o => o.dispatchStatus === "pending" || String(o.driverId) === String(req.staffUser._id));
@@ -704,7 +703,6 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
   }
 });
 
-// NEW: Complete an active delivery request
 app.patch("/api/driver/orders/:id/complete", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can complete delivery requests." });
@@ -864,15 +862,51 @@ app.delete("/api/conversations/:id", async (req, res) => {
   }
 });
 
+// NEW: Helper function to parse Google Maps Pin Drop URLs
+function formatWaypoint(inputStr) {
+  if (!inputStr || typeof inputStr !== "string") return { address: "Toronto, ON" };
+
+  const pinMatch = inputStr.match(/3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+  if (pinMatch) return { location: { latLng: { latitude: parseFloat(pinMatch[1]), longitude: parseFloat(pinMatch[2]) } } };
+  
+  const atMatch = inputStr.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+  if (atMatch) return { location: { latLng: { latitude: parseFloat(atMatch[1]), longitude: parseFloat(atMatch[2]) } } };
+
+  const qMatch = inputStr.match(/q=(-?\d+\.\d+),(-?\d+\.\d+)/);
+  if (qMatch) return { location: { latLng: { latitude: parseFloat(qMatch[1]), longitude: parseFloat(qMatch[2]) } } };
+
+  const rawMatch = inputStr.match(/^(-?\d+\.\d+),\s*(-?\d+\.\d+)$/);
+  if (rawMatch) return { location: { latLng: { latitude: parseFloat(rawMatch[1]), longitude: parseFloat(rawMatch[2]) } } };
+
+  return { address: inputStr };
+}
+
 app.post("/api/shipping-quote", async (req, res) => {
   try {
     const { origin, destination } = req.body;
     if (!process.env.GOOGLE_MAPS_API_KEY) return res.status(500).json({ error: "Google Maps API key missing." });
+    
     const mapUrl = "https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix";
-    const requestBody = { origins: [{ waypoint: { address: origin } }], destinations: [{ waypoint: { address: destination } }], travelMode: "DRIVE" };
-    const response = await fetch(mapUrl, { method: "POST", headers: { "Content-Type": "application/json", "X-Goog-Api-Key": process.env.GOOGLE_MAPS_API_KEY, "X-Goog-FieldMask": "originIndex,destinationIndex,duration,distanceMeters,status,condition" }, body: JSON.stringify(requestBody) });
+    const requestBody = { 
+      origins: [{ waypoint: formatWaypoint(origin) }], 
+      destinations: [{ waypoint: formatWaypoint(destination) }], 
+      travelMode: "DRIVE" 
+    };
+
+    const response = await fetch(mapUrl, { 
+      method: "POST", 
+      headers: { 
+        "Content-Type": "application/json", 
+        "X-Goog-Api-Key": process.env.GOOGLE_MAPS_API_KEY, 
+        "X-Goog-FieldMask": "originIndex,destinationIndex,duration,distanceMeters,status,condition" 
+      }, 
+      body: JSON.stringify(requestBody) 
+    });
+    
     const data = await response.json();
+    
     if (data.error) return res.status(400).json({ error: `Google API Error: ${data.error.message}` });
+    
     if (Array.isArray(data) && data.length > 0) {
       if (data[0].distanceMeters != null) {
         const distanceKm = Math.ceil(data[0].distanceMeters / 1000);
@@ -881,7 +915,7 @@ app.post("/api/shipping-quote", async (req, res) => {
         return res.status(400).json({ error: `Google Maps: ${data[0].status.message}` });
       }
     }
-    res.status(400).json({ error: "Could not calculate driving distance between these addresses." });
+    res.status(400).json({ error: "Could not calculate driving distance between these addresses/pins." });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
