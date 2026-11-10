@@ -15,13 +15,10 @@ export default function PortalLayout({
   let navItems = [];
 
   if (isDriver) {
+    // NEW: Added Messages tab for drivers to chat with buyers
     navItems = [
-      {
-        id: "driver",
-        label: "Driver Portal",
-        icon: "🚚",
-        badge: null
-      }
+      { id: "driver", label: "Driver Portal", icon: "🚚", badge: null },
+      { id: "messages", label: "Messages", icon: "💬", badge: counts.unreadMessages }
     ];
   } else if (isStaff) {
     navItems = [
