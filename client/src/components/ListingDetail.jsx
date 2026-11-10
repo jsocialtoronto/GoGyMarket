@@ -6,7 +6,7 @@ const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:5000").repla
 
 export default function ListingDetail({
   listing,
-  cart = [], // NEW: Accept cart to check stock limits
+  cart = [], 
   onClose,
   onMessageSeller,
   onAddToCart,
@@ -20,8 +20,7 @@ export default function ListingDetail({
 
   const [deliveryMethod, setDeliveryMethod] = useState("pickup");
   
-  // NEW: Advanced Delivery Location & Instructions States
-  const [buyerLocationType, setBuyerLocationType] = useState("address"); // 'address' | 'pin'
+  const [buyerLocationType, setBuyerLocationType] = useState("address");
   const [buyerAddress, setBuyerAddress] = useState(currentUser?.location || "");
   const [buyerPin, setBuyerPin] = useState("");
   const [specialInstructions, setSpecialInstructions] = useState("");
@@ -31,7 +30,6 @@ export default function ListingDetail({
   const [isCalculating, setIsCalculating] = useState(false);
   const [calcError, setCalcError] = useState("");
 
-  // STOCK CALCULATION LOGIC (Prevents over-adding)
   const availableStock = listing.stockCount != null ? Number(listing.stockCount) : 1;
   const qtyInCart = cart.filter(item => item._id === listing._id).reduce((sum, item) => sum + item.quantity, 0);
   const remainingStockForUser = Math.max(0, availableStock - qtyInCart);
@@ -44,7 +42,6 @@ export default function ListingDetail({
     setCalcError("");
   }, [listing._id]);
 
-  // Ensure selected quantity never exceeds remaining available stock
   useEffect(() => {
     if (quantity > remainingStockForUser && remainingStockForUser > 0) {
       setQuantity(remainingStockForUser);
@@ -285,7 +282,7 @@ export default function ListingDetail({
                   <div className="mt-4 pt-4 border-t border-slate-200 space-y-4">
                     
                     <div>
-                      <div className="flex gap-4 mb-2">
+                      <div className="flex flex-wrap items-center gap-4 mb-2">
                         <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
                           <input 
                             type="radio" 
@@ -295,15 +292,25 @@ export default function ListingDetail({
                             className="text-emerald-600"
                           /> Street Address
                         </label>
-                        <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
-                          <input 
-                            type="radio" 
-                            name="locationTypeToggle"
-                            checked={buyerLocationType === 'pin'} 
-                            onChange={() => { setBuyerLocationType('pin'); setShippingCost(null); }}
-                            className="text-emerald-600"
-                          /> Pin Drop URL
-                        </label>
+                        <div className="flex items-center">
+                          <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                            <input 
+                              type="radio" 
+                              name="locationTypeToggle"
+                              checked={buyerLocationType === 'pin'} 
+                              onChange={() => { setBuyerLocationType('pin'); setShippingCost(null); }}
+                              className="text-emerald-600"
+                            /> Pin Drop URL
+                          </label>
+                          {/* NEW: Clickable Help Link */}
+                          <button
+                            type="button"
+                            onClick={() => alert("How to get a Google Maps Pin URL:\n\n1. Open Google Maps.\n2. Zoom into your exact location.\n3. Press and hold on the map to drop a red pin.\n4. Swipe up and tap 'Share'.\n5. Copy the link and paste it here.")}
+                            className="text-[10px] text-blue-600 hover:text-blue-800 hover:underline ml-2 font-bold"
+                          >
+                            (How to use this?)
+                          </button>
+                        </div>
                       </div>
 
                       <div className="flex flex-col sm:flex-row gap-2">
