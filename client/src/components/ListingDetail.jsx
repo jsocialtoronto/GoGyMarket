@@ -14,7 +14,7 @@ export default function ListingDetail({
   onToggleFavourite,
   formatPrice,
   currentUser,
-  activeTab // NEW: Prop to know where the user came from
+  activeTab
 }) {
   const [mainImageIndex, setMainImageIndex] = useState(0);
   const [quantity, setQuantity] = useState(1);
@@ -25,9 +25,6 @@ export default function ListingDetail({
   const [buyerAddress, setBuyerAddress] = useState(currentUser?.location || "");
   const [buyerPin, setBuyerPin] = useState("");
   const [specialInstructions, setSpecialInstructions] = useState("");
-  
-  // Buyer's personal input mask (keeps their screen private while typing in public)
-  const [isAddressMasked, setIsAddressMasked] = useState(true);
 
   const [shippingCost, setShippingCost] = useState(null);
   const [shippingDistance, setShippingDistance] = useState(null);
@@ -326,9 +323,10 @@ export default function ListingDetail({
                       </div>
 
                       <div className="flex flex-col sm:flex-row gap-2">
+                        {/* UPDATE: Removed buyer address masking so they can see what they type */}
                         <div className="relative flex-1">
                           <input
-                            type={isAddressMasked ? "password" : "text"}
+                            type="text"
                             placeholder={buyerLocationType === 'address' ? "e.g. 15 Eastdale Avenue, Toronto" : "Paste Google Maps Pin URL here..."}
                             value={buyerLocationType === 'address' ? buyerAddress : buyerPin}
                             onChange={(e) => { 
@@ -336,16 +334,8 @@ export default function ListingDetail({
                               else setBuyerPin(e.target.value); 
                               setShippingCost(null); 
                             }}
-                            className="w-full border border-slate-300 rounded-lg px-3 py-2 pr-12 text-sm focus:outline-none focus:border-emerald-500"
+                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
                           />
-                          <button
-                            type="button"
-                            onClick={() => setIsAddressMasked(!isAddressMasked)}
-                            className="absolute right-3 top-2 text-lg text-slate-400 hover:text-slate-600"
-                            title={isAddressMasked ? "Show Input" : "Hide Input"}
-                          >
-                            {isAddressMasked ? "👁️" : "🙈"}
-                          </button>
                         </div>
 
                         <button
