@@ -13,9 +13,12 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
     price: "",
     stockCount: 1,
     location: currentUser?.location || "Toronto, ON",
-    description: "",
-    imageStr: ""
+    isLocationMasked: true,
+    description: ""
   });
+  
+  // NEW: Store base64 images directly
+  const [images, setImages] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -26,6 +29,27 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
       category: newCat,
       subcategory: MARKETPLACE_CATEGORIES[newCat][0]
     });
+  };
+
+  // Convert uploaded files to base64 strings to save to DB
+  const handleImageUpload = (e) => {
+    const files = Array.from(e.target.files);
+    Promise.all(files.map(file => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => resolve(ev.target.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    })).then(base64Images => {
+      setImages(prev => [...prev, ...base64Images].slice(0, 5)); // max 5 images
+    }).catch(err => {
+      setError("Failed to read image file.");
+    });
+  };
+
+  const removeImage = (indexToRemove) => {
+    setImages(prev => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
   const handleSubmit = async (e) => {
@@ -44,8 +68,9 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
         price: Number(formData.price || 0),
         stockCount: Math.max(1, Number(formData.stockCount || 1)),
         location: formData.location.trim(),
+        isLocationMasked: formData.isLocationMasked,
         description: formData.description.trim(),
-        images: formData.imageStr.split(",").map(s => s.trim()).filter(Boolean)
+        images: images // Send array of base64 strings
       };
 
       const res = await fetch(`${API_BASE}/api/listings`, {
@@ -140,29 +165,40 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Quantity Available *</label>
-            <input 
-              type="number" 
-              min="1" 
-              required 
-              value={formData.stockCount} 
-              onChange={e => setFormData({...formData, stockCount: e.target.value})} 
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" 
-            />
+        <div className="grid grid-cols-1 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Quantity Available *</label>
+              <input 
+                type="number" 
+                min="1" 
+                required 
+                value={formData.stockCount} 
+                onChange={e => setFormData({...formData, stockCount: e.target.value})} 
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" 
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Pickup Location (Origin) *</label>
+              <input 
+                type="text" 
+                required 
+                value={formData.location} 
+                onChange={e => setFormData({...formData, location: e.target.value})} 
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" 
+                placeholder="City or Neighborhood" 
+              />
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Pickup Location (Origin) *</label>
+          <label className="flex items-center gap-2 cursor-pointer bg-slate-50 border border-slate-200 p-3 rounded-lg w-fit">
             <input 
-              type="text" 
-              required 
-              value={formData.location} 
-              onChange={e => setFormData({...formData, location: e.target.value})} 
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" 
-              placeholder="City or Neighborhood" 
+              type="checkbox" 
+              checked={formData.isLocationMasked} 
+              onChange={e => setFormData({...formData, isLocationMasked: e.target.checked})}
+              className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
             />
-          </div>
+            <span className="text-sm font-bold text-slate-700">Mask my exact address from public view</span>
+          </label>
         </div>
 
         <div>
@@ -178,14 +214,38 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
         </div>
 
         <div>
-          <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Image URLs (comma-separated)</label>
-          <input 
-            type="text" 
-            value={formData.imageStr} 
-            onChange={e => setFormData({...formData, imageStr: e.target.value})} 
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" 
-            placeholder="https://example.com/image1.jpg, https://..." 
-          />
+          <label className="block text-xs font-bold uppercase text-slate-700 mb-2">Upload Photos</label>
+          
+          <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 transition-colors">
+             <span className="text-2xl mb-2">📸</span>
+             <span className="text-sm font-bold text-emerald-700">Tap to Take Photo or Browse Library</span>
+             <span className="text-xs text-slate-500 mt-1">Up to 5 images</span>
+             <input 
+               type="file" 
+               accept="image/*" 
+               capture="environment"
+               multiple
+               onChange={handleImageUpload}
+               className="hidden"
+             />
+          </label>
+          
+          {images.length > 0 && (
+            <div className="flex flex-wrap gap-3 mt-4">
+              {images.map((src, idx) => (
+                <div key={idx} className="relative w-20 h-20 border border-slate-200 rounded-lg overflow-hidden">
+                  <img src={src} alt="Upload preview" className="w-full h-full object-cover" />
+                  <button 
+                    type="button"
+                    onClick={() => removeImage(idx)}
+                    className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold shadow-md hover:bg-red-500"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <button 
