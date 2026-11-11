@@ -60,7 +60,8 @@ const listingSchema = new mongoose.Schema(
     subcategory: { type: String, required: true, index: true },
     pricingType: {
       type: String,
-      enum: ["fixed", "hourly", "free", "contact_for_quote"],
+      // UPDATE: Completely removed "contact_for_quote"
+      enum: ["fixed", "hourly", "free"],
       default: "fixed"
     },
     price: { type: Number, default: 0 },
@@ -788,10 +789,8 @@ app.post("/api/listings", async (req, res) => {
   }
 });
 
-// NEW: Edit Listing Details
 app.put("/api/listings/:id", async (req, res) => {
   try {
-    // Only updating text fields and stock to keep it secure
     const { title, description, price, stockCount } = req.body;
     const stock = stockCount != null ? Number(stockCount) : 1;
     
@@ -915,7 +914,6 @@ app.delete("/api/conversations/:id", async (req, res) => {
   }
 });
 
-// NEW: Async URL Parser that actively fetches short URLs (maps.app.goo.gl) to uncover hidden coordinates
 async function formatWaypoint(inputStr) {
   if (!inputStr || typeof inputStr !== "string") return { address: "Toronto, ON" };
 
@@ -923,7 +921,6 @@ async function formatWaypoint(inputStr) {
   
   if (inputStr.includes("maps.app.goo.gl") || inputStr.includes("goo.gl")) {
     try {
-      // Follow the redirect to get the long URL with embedded coordinates
       const response = await fetch(inputStr, { method: "HEAD", redirect: "follow" });
       urlToTest = response.url;
     } catch (e) {
