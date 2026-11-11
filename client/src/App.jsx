@@ -5,7 +5,7 @@ import PostListingForm from "./components/PostListingForm";
 import ListingDetail from "./components/ListingDetail";
 import AuthScreen from "./components/AuthScreen";
 import AdminDashboard from "./components/AdminDashboard";
-import { MARKETPLACE_CATEGORIES } from "./config/categoriesConfig";
+import { MARKETPLACE_CATEGORIES, LISTING_STATUSES } from "./config/categoriesConfig";
 
 const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:5000").replace(/\/$/, "");
 
@@ -48,8 +48,6 @@ export default function App() {
   const [isProcessingOrder, setIsProcessingOrder] = useState(false);
   const [completedOrder, setCompletedOrder] = useState(null);
 
-  const [sellQuantities, setSellQuantities] = useState({});
-
   const [myOrders, setMyOrders] = useState([]);
   const [allRatings, setAllRatings] = useState([]);
   const [ratingStars, setRatingStars] = useState({});
@@ -65,6 +63,10 @@ export default function App() {
   const [conversations, setConversations] = useState([]);
   const [activeConvId, setActiveConvId] = useState(null);
   const [replyText, setReplyText] = useState("");
+
+  // NEW: State for Editing Listings
+  const [editingListing, setEditingListing] = useState(null);
+  const [editFormData, setEditFormData] = useState({ title: "", description: "", price: "", stockCount: 1 });
 
   const loadMarketplaceData = async () => {
     try {
@@ -203,25 +205,6 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  const handleSellerMarkSold = async (e, item) => {
-    e.stopPropagation();
-    const qtyToSell = Number(sellQuantities[item._id] || 1);
-    try {
-      const res = await fetch(`${API_BASE}/api/listings/${item._id}/deduct-stock`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quantity: qtyToSell })
-      });
-      if (res.ok) {
-        const updated = await res.json();
-        setListings((prev) => prev.map((l) => (l._id === item._id ? updated : l)));
-        setSellQuantities((prev) => ({ ...prev, [item._id]: 1 }));
-      }
-    } catch (err) {
-      console.error("Failed to deduct stock:", err);
-    }
-  };
-
   const handleDeleteListing = async (e, listingId) => {
     e.stopPropagation();
     try {
@@ -229,6 +212,29 @@ export default function App() {
       if (res.ok) setListings((prev) => prev.filter((item) => item._id !== listingId));
     } catch (err) {
       console.error("Failed to delete listing:", err);
+    }
+  };
+
+  // NEW: Handle Edit Listing Submission
+  const handleEditSubmit = async (e) => {
+    e.preventDefault();
+    if (!editingListing) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/listings/${editingListing._id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editFormData)
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setListings((prev) => prev.map((l) => (l._id === updated._id ? updated : l)));
+        setEditingListing(null); // close modal
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to update listing.");
+      }
+    } catch (err) {
+      console.error("Error updating listing:", err);
     }
   };
 
@@ -545,7 +551,6 @@ export default function App() {
           localStorage.setItem("gogy_user", JSON.stringify(user));
           localStorage.setItem("gogy_token", token);
           setCurrentUser(user);
-          // NEW: Auto-route the user to their designated tab the moment they log in
           if (user.role === "driver") {
             setActiveTab("driver");
           } else if (user.role === "admin" || user.role === "viewer") {
@@ -775,6 +780,12 @@ export default function App() {
                 {isLoading ? (
                   <div className="bg-white p-10 rounded-xl border border-slate-200 text-center text-slate-500 text-sm">
                     Loading live listings from MongoDB...
+                  </div>
+                ) : filteredListings.length === 0 ? (
+                  <div className="bg-white p-10 rounded-xl border border-slate-200 text-center space-y-3">
+                    <p className="text-slate-600 text-sm font-medium">
+                      No active listings match this search.
+                    </p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1112,8 +1123,8 @@ export default function App() {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-xl font-bold">My Listings & Stock Manager</h2>
-                  <p className="text-xs text-slate-500">Manage your inventory or deduct stock when completing a Local Pickup sale</p>
+                  <h2 className="text-xl font-bold">My Listings</h2>
+                  <p className="text-xs text-slate-500">Edit or manage the items you have listed on GoGyMarket.</p>
                 </div>
                 <button onClick={() => setActiveTab("post")} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2.5 rounded-lg shadow-sm">+ Post Another Listing</button>
               </div>
@@ -1145,16 +1156,22 @@ export default function App() {
                           </div>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-2 self-end sm:self-center" onClick={(e) => e.stopPropagation()}>
-                          {!isSoldOut && (
-                            <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
-                              <label className="text-xs font-semibold text-slate-600 pl-1">Qty Sold:</label>
-                              <select value={sellQuantities[item._id] || 1} onChange={(e) => setSellQuantities((prev) => ({ ...prev, [item._id]: Number(e.target.value) }))} className="rounded border border-slate-300 px-2 py-1 text-xs font-bold bg-white">
-                                {Array.from({ length: stock }, (_, idx) => idx + 1).map((num) => (<option key={num} value={num}>{num}</option>))}
-                              </select>
-                              <button onClick={(e) => handleSellerMarkSold(e, item)} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded">Mark Sold</button>
-                            </div>
-                          )}
+                        <div className="flex flex-wrap items-center gap-2 self-end sm:self-center">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingListing(item);
+                              setEditFormData({
+                                title: item.title,
+                                description: item.description,
+                                price: item.price,
+                                stockCount: item.stockCount
+                              });
+                            }}
+                            className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold px-3 py-1.5 rounded-lg"
+                          >
+                            ✏️ Edit
+                          </button>
                           <button onClick={(e) => handleDeleteListing(e, item._id)} className="text-xs text-red-600 font-semibold hover:underline px-2 py-1">Delete</button>
                         </div>
                       </div>
@@ -1186,6 +1203,69 @@ export default function App() {
             </div>
           )}
         </>
+      )}
+
+      {/* NEW: Edit Listing Modal Overlay */}
+      {editingListing && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white max-w-md w-full rounded-xl p-6 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+              <h3 className="font-bold text-slate-900 text-lg">Edit Listing</h3>
+              <button onClick={() => setEditingListing(null)} className="text-slate-400 hover:text-slate-700 font-bold">✕</button>
+            </div>
+            <form onSubmit={handleEditSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Title</label>
+                <input 
+                  type="text" 
+                  required 
+                  value={editFormData.title} 
+                  onChange={e => setEditFormData({...editFormData, title: e.target.value})} 
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" 
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Description</label>
+                <textarea 
+                  rows="4" 
+                  required 
+                  value={editFormData.description} 
+                  onChange={e => setEditFormData({...editFormData, description: e.target.value})} 
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                ></textarea>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Price (GYD)</label>
+                  <input 
+                    type="number" 
+                    min="0" 
+                    required 
+                    value={editFormData.price} 
+                    onChange={e => setEditFormData({...editFormData, price: e.target.value})} 
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Stock Available</label>
+                  <input 
+                    type="number" 
+                    min="0" 
+                    required 
+                    value={editFormData.stockCount} 
+                    onChange={e => setEditFormData({...editFormData, stockCount: e.target.value})} 
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" 
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">Set to 0 to mark as Sold Out.</p>
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                <button type="button" onClick={() => setEditingListing(null)} className="px-4 py-2 text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg">Cancel</button>
+                <button type="submit" className="px-5 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg shadow-sm transition-colors">Save Changes</button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </PortalLayout>
   );
