@@ -5,7 +5,7 @@ import PostListingForm from "./components/PostListingForm";
 import ListingDetail from "./components/ListingDetail";
 import AuthScreen from "./components/AuthScreen";
 import AdminDashboard from "./components/AdminDashboard";
-import { MARKETPLACE_CATEGORIES, LISTING_STATUSES } from "./config/categoriesConfig";
+import { MARKETPLACE_CATEGORIES } from "./config/categoriesConfig";
 
 const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:5000").replace(/\/$/, "");
 
@@ -48,6 +48,8 @@ export default function App() {
   const [isProcessingOrder, setIsProcessingOrder] = useState(false);
   const [completedOrder, setCompletedOrder] = useState(null);
 
+  const [sellQuantities, setSellQuantities] = useState({});
+
   const [myOrders, setMyOrders] = useState([]);
   const [allRatings, setAllRatings] = useState([]);
   const [ratingStars, setRatingStars] = useState({});
@@ -59,14 +61,17 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCat, setSelectedCat] = useState("");
   const [selectedSubcat, setSelectedSubcat] = useState("");
+  const [minPrice, setMinPrice] = useState("");
+  const [maxPrice, setMaxPrice] = useState("");
+  const [locationFilter, setLocationFilter] = useState("");
 
   const [conversations, setConversations] = useState([]);
   const [activeConvId, setActiveConvId] = useState(null);
   const [replyText, setReplyText] = useState("");
 
-  // NEW: State for Editing Listings
   const [editingListing, setEditingListing] = useState(null);
-  const [editFormData, setEditFormData] = useState({ title: "", description: "", price: "", stockCount: 1 });
+  // UPDATE: Ensure edit state includes isLocationMasked toggle
+  const [editFormData, setEditFormData] = useState({ title: "", description: "", price: "", stockCount: 1, isLocationMasked: true });
 
   const loadMarketplaceData = async () => {
     try {
@@ -164,7 +169,6 @@ export default function App() {
   const formatPrice = (item) => {
     if (!item) return "$0 GYD";
     if (item.pricingType === "free") return "FREE";
-    if (item.pricingType === "contact_for_quote") return "Contact for Quote";
     if (item.pricingType === "hourly") return `$${Number(item.price || 0).toLocaleString()} GYD/hr`;
     return `$${Number(item.price || 0).toLocaleString()} GYD`;
   };
@@ -215,7 +219,6 @@ export default function App() {
     }
   };
 
-  // NEW: Handle Edit Listing Submission
   const handleEditSubmit = async (e) => {
     e.preventDefault();
     if (!editingListing) return;
@@ -228,13 +231,32 @@ export default function App() {
       if (res.ok) {
         const updated = await res.json();
         setListings((prev) => prev.map((l) => (l._id === updated._id ? updated : l)));
-        setEditingListing(null); // close modal
+        setEditingListing(null);
       } else {
         const data = await res.json();
         alert(data.error || "Failed to update listing.");
       }
     } catch (err) {
       console.error("Error updating listing:", err);
+    }
+  };
+
+  const handleSellerMarkSold = async (e, item) => {
+    e.stopPropagation();
+    const qtyToSell = Number(sellQuantities[item._id] || 1);
+    try {
+      const res = await fetch(`${API_BASE}/api/listings/${item._id}/deduct-stock`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quantity: qtyToSell })
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setListings((prev) => prev.map((l) => (l._id === item._id ? updated : l)));
+        setSellQuantities((prev) => ({ ...prev, [item._id]: 1 }));
+      }
+    } catch (err) {
+      console.error("Failed to deduct stock:", err);
     }
   };
 
@@ -470,9 +492,14 @@ export default function App() {
         (item.description && item.description.toLowerCase().includes(searchQuery.toLowerCase()));
       const matchesCat = !selectedCat || item.category === selectedCat;
       const matchesSub = !selectedSubcat || item.subcategory === selectedSubcat;
-      return matchesKeyword && matchesCat && matchesSub;
+      const itemPrice = Number(item.price || 0);
+      const matchesMinPrice = minPrice === "" || itemPrice >= Number(minPrice);
+      const matchesMaxPrice = maxPrice === "" || itemPrice <= Number(maxPrice);
+      const matchesLocation = !locationFilter || (item.location && item.location.toLowerCase().includes(locationFilter.toLowerCase()));
+
+      return matchesKeyword && matchesCat && matchesSub && matchesMinPrice && matchesMaxPrice && matchesLocation;
     });
-  }, [listings, searchQuery, selectedCat, selectedSubcat]);
+  }, [listings, searchQuery, selectedCat, selectedSubcat, minPrice, maxPrice, locationFilter]);
 
   const myListings = (listings || []).filter((item) => item?.sellerId === currentUser?.id);
   const favouriteListings = (listings || []).filter((item) => favouriteIds.includes(item?._id));
@@ -576,7 +603,6 @@ export default function App() {
         orders: myOrders.length
       }}
     >
-      {/* 1. STRICT DRIVER PORTAL RENDERING */}
       {isDriver ? (
         <>
           {activeTab === "driver" && (
@@ -670,14 +696,10 @@ export default function App() {
           )}
           {activeTab === "messages" && renderMessagesTab()}
         </>
-
-      /* 2. STRICT ADMIN PORTAL RENDERING */
       ) : isStaff ? (
         activeTab === "admin" && (
           <AdminDashboard currentUser={currentUser} onOrdersUpdated={loadMarketplaceData} />
         )
-
-      /* 3. PRODUCT DETAIL VIEW */
       ) : selectedListing ? (
         <ListingDetail
           listing={selectedListing}
@@ -693,9 +715,8 @@ export default function App() {
           }}
           formatPrice={formatPrice}
           currentUser={currentUser}
+          activeTab={activeTab} // Passed to strictly map "Back" button text
         />
-
-      /* 4. REGULAR USER MARKETPLACE TABS */
       ) : (
         <>
           {activeTab === "search" && (
@@ -752,6 +773,54 @@ export default function App() {
                     </li>
                   ))}
                 </ul>
+
+                <div className="pt-4 border-t border-slate-200 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h2 className="font-bold text-sm uppercase tracking-wider text-slate-600">Advanced Filters</h2>
+                    {(minPrice || maxPrice || locationFilter) && (
+                      <button
+                        onClick={() => { setMinPrice(""); setMaxPrice(""); setLocationFilter(""); }}
+                        className="text-xs text-emerald-600 font-semibold hover:underline"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Price Range (GYD)</label>
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="number" 
+                        placeholder="Min $" 
+                        value={minPrice} 
+                        onChange={e => setMinPrice(e.target.value)} 
+                        className="w-full border border-slate-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-emerald-500" 
+                      />
+                      <span className="text-slate-400">-</span>
+                      <input 
+                        type="number" 
+                        placeholder="Max $" 
+                        value={maxPrice} 
+                        onChange={e => setMaxPrice(e.target.value)} 
+                        className="w-full border border-slate-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-emerald-500" 
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Location Match</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. Toronto" 
+                      value={locationFilter} 
+                      onChange={e => setLocationFilter(e.target.value)} 
+                      className="w-full border border-slate-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-emerald-500" 
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">Filters listings containing this city or neighborhood name.</p>
+                  </div>
+                </div>
+
                 <div className="pt-3 border-t border-slate-200">
                   <button
                     onClick={() => setActiveTab("post")}
@@ -784,7 +853,7 @@ export default function App() {
                 ) : filteredListings.length === 0 ? (
                   <div className="bg-white p-10 rounded-xl border border-slate-200 text-center space-y-3">
                     <p className="text-slate-600 text-sm font-medium">
-                      No active listings match this search.
+                      No active listings match your search and filter criteria.
                     </p>
                   </div>
                 ) : (
@@ -792,7 +861,7 @@ export default function App() {
                     {filteredListings.map((item) => {
                       const isFav = favouriteIds.includes(item._id);
                       const stock = item.stockCount != null ? Number(item.stockCount) : 1;
-                      const isService = item.category === "Services";
+                      const isSellerMasked = item.isLocationMasked !== false;
 
                       return (
                         <div
@@ -805,7 +874,7 @@ export default function App() {
                             <button onClick={(e) => toggleFavourite(e, item._id)} className="absolute top-2 right-2 w-8 h-8 rounded-full bg-white/90 shadow flex items-center justify-center text-sm hover:scale-110">
                               {isFav ? "❤️" : "🤍"}
                             </button>
-                            {!isService && stock === 1 && (
+                            {stock === 1 && (
                               <span className="absolute top-2 left-2 bg-red-600 text-white text-[11px] font-black px-2.5 py-1 rounded-full shadow-md animate-pulse">🔥 Only 1 Available!</span>
                             )}
                             <span className="absolute bottom-2 left-2 bg-slate-900/80 text-white text-[11px] px-2 py-0.5 rounded">{item.category} › {item.subcategory}</span>
@@ -814,12 +883,12 @@ export default function App() {
                             <div>
                               <div className="flex items-center justify-between gap-2">
                                 <p className="text-emerald-700 font-extrabold text-lg">{formatPrice(item)}</p>
-                                {!isService && stock > 1 && <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">{stock} in stock</span>}
+                                {stock > 1 && <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">{stock} in stock</span>}
                               </div>
                               <h3 className="font-bold text-sm text-slate-900 line-clamp-2 mt-0.5 group-hover:text-emerald-700">{item.title}</h3>
                             </div>
                             <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                              <span className="truncate max-w-[100px]">📍 {item.location}</span>
+                              <span className="truncate max-w-[100px]">📍 {isSellerMasked && currentUser?.id !== item.sellerId ? "Hidden for Privacy" : item.location}</span>
                               {item.sellerRatingCount > 0 ? (
                                 <span className="font-bold text-yellow-600">⭐ {item.sellerRating}</span>
                               ) : (
@@ -1107,9 +1176,6 @@ export default function App() {
             </div>
           )}
 
-          {/* User Messages Tab */}
-          {activeTab === "messages" && renderMessagesTab()}
-
           {activeTab === "post" && (
             <PostListingForm
               currentUser={currentUser}
@@ -1165,7 +1231,8 @@ export default function App() {
                                 title: item.title,
                                 description: item.description,
                                 price: item.price,
-                                stockCount: item.stockCount
+                                stockCount: item.stockCount,
+                                isLocationMasked: item.isLocationMasked !== false // Default to true if undefined on older items
                               });
                             }}
                             className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold px-3 py-1.5 rounded-lg"
@@ -1205,7 +1272,6 @@ export default function App() {
         </>
       )}
 
-      {/* NEW: Edit Listing Modal Overlay */}
       {editingListing && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200">
           <div className="bg-white max-w-md w-full rounded-xl p-6 shadow-xl space-y-4">
@@ -1259,6 +1325,17 @@ export default function App() {
                   <p className="text-[10px] text-slate-500 mt-1">Set to 0 to mark as Sold Out.</p>
                 </div>
               </div>
+              
+              <label className="flex items-center gap-2 cursor-pointer bg-slate-50 border border-slate-200 p-3 rounded-lg w-fit mt-2">
+                <input 
+                  type="checkbox" 
+                  checked={editFormData.isLocationMasked} 
+                  onChange={e => setEditFormData({...editFormData, isLocationMasked: e.target.checked})}
+                  className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
+                />
+                <span className="text-sm font-bold text-slate-700">Mask my exact address from public view</span>
+              </label>
+
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
                 <button type="button" onClick={() => setEditingListing(null)} className="px-4 py-2 text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg">Cancel</button>
                 <button type="submit" className="px-5 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg shadow-sm transition-colors">Save Changes</button>
