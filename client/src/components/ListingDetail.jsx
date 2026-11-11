@@ -13,7 +13,8 @@ export default function ListingDetail({
   isFavourite,
   onToggleFavourite,
   formatPrice,
-  currentUser
+  currentUser,
+  activeTab // NEW: Prop to know where the user came from
 }) {
   const [mainImageIndex, setMainImageIndex] = useState(0);
   const [quantity, setQuantity] = useState(1);
@@ -25,10 +26,8 @@ export default function ListingDetail({
   const [buyerPin, setBuyerPin] = useState("");
   const [specialInstructions, setSpecialInstructions] = useState("");
   
+  // Buyer's personal input mask (keeps their screen private while typing in public)
   const [isAddressMasked, setIsAddressMasked] = useState(true);
-  
-  // NEW: Seller Address Mask State
-  const [isSellerAddressMasked, setIsSellerAddressMasked] = useState(true);
 
   const [shippingCost, setShippingCost] = useState(null);
   const [shippingDistance, setShippingDistance] = useState(null);
@@ -45,7 +44,6 @@ export default function ListingDetail({
     setDeliveryMethod("pickup");
     setShippingCost(null);
     setCalcError("");
-    setIsSellerAddressMasked(true); // reset mask on item change
   }, [listing._id]);
 
   useEffect(() => {
@@ -59,6 +57,15 @@ export default function ListingDetail({
     : ["https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&auto=format&fit=crop&q=80"];
 
   const isOwner = listing.sellerId === currentUser.id;
+
+  // Seller location display logic (Strictly controlled by the seller's settings)
+  const isSellerMasked = listing.isLocationMasked !== false; 
+  const displayLocation = (isSellerMasked && !isOwner) ? "Hidden for Privacy" : listing.location;
+
+  // Dynamic back button text
+  let backText = "Back to Search";
+  if (activeTab === "listings") backText = "Back to My Listings";
+  if (activeTab === "favourites") backText = "Back to Saved";
 
   const handleCalculateShipping = async () => {
     const destination = buyerLocationType === "pin" ? buyerPin : buyerAddress;
@@ -76,7 +83,7 @@ export default function ListingDetail({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          origin: `${listing.location}, Canada`,
+          origin: `${listing.location}, Canada`, // Always uses real backend location for math
           destination: buyerLocationType === "pin" ? destination : `${destination}, Canada`
         })
       });
@@ -129,7 +136,7 @@ export default function ListingDetail({
           onClick={onClose}
           className="text-slate-600 hover:text-emerald-700 font-bold text-sm flex items-center gap-2"
         >
-          <span>←</span> Back to Search
+          <span>←</span> {backText}
         </button>
         <div className="flex gap-2 text-xs font-semibold text-slate-500">
           <span>{listing.category}</span>
@@ -180,15 +187,7 @@ export default function ListingDetail({
                 <div className="inline-flex items-center gap-1.5 bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200">
                   <span>📍</span> 
                   <span className="flex items-center gap-2">
-                    Origin: {isSellerAddressMasked ? "••••••••••••" : listing.location}
-                    <button
-                      type="button"
-                      onClick={() => setIsSellerAddressMasked(!isSellerAddressMasked)}
-                      className="text-slate-400 hover:text-slate-600 focus:outline-none"
-                      title={isSellerAddressMasked ? "Show Address" : "Hide Address"}
-                    >
-                      {isSellerAddressMasked ? "👁️" : "🙈"}
-                    </button>
+                    Origin: {displayLocation}
                   </span>
                 </div>
 
@@ -262,7 +261,7 @@ export default function ListingDetail({
                       className="w-5 h-5 text-emerald-600 focus:ring-emerald-500"
                     />
                     <div>
-                      <p className="font-bold text-slate-900 text-sm">Option 1: Local Pickup in Toronto (Origin)</p>
+                      <p className="font-bold text-slate-900 text-sm">Option 1: Local Pickup ({displayLocation})</p>
                       <p className="text-xs text-slate-500 font-medium">
                         Free • Arrange pickup & payment directly with seller via messaging
                       </p>
@@ -343,7 +342,7 @@ export default function ListingDetail({
                             type="button"
                             onClick={() => setIsAddressMasked(!isAddressMasked)}
                             className="absolute right-3 top-2 text-lg text-slate-400 hover:text-slate-600"
-                            title={isAddressMasked ? "Show Address" : "Hide Address"}
+                            title={isAddressMasked ? "Show Input" : "Hide Input"}
                           >
                             {isAddressMasked ? "👁️" : "🙈"}
                           </button>
