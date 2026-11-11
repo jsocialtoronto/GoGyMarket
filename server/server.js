@@ -60,13 +60,13 @@ const listingSchema = new mongoose.Schema(
     subcategory: { type: String, required: true, index: true },
     pricingType: {
       type: String,
-      // UPDATE: Completely removed "contact_for_quote"
       enum: ["fixed", "hourly", "free"],
       default: "fixed"
     },
     price: { type: Number, default: 0 },
     stockCount: { type: Number, required: true, default: 1, min: 0 },
     location: { type: String, required: true },
+    isLocationMasked: { type: Boolean, default: true }, // NEW: Seller Location Privacy
     deliveryMethods: { type: [String], default: ["pickup"] },
     deliveryFee: { type: Number, default: 0 },
     description: { type: String, required: true },
@@ -781,7 +781,8 @@ app.post("/api/listings", async (req, res) => {
       stockCount: stock,
       status: stock > 0 ? "active" : "sold",
       sellerRating: seller ? seller.averageRating : 0,
-      sellerRatingCount: seller ? seller.ratingCount : 0
+      sellerRatingCount: seller ? seller.ratingCount : 0,
+      isLocationMasked: req.body.isLocationMasked !== undefined ? req.body.isLocationMasked : true
     });
     res.status(201).json(newListing);
   } catch (err) {
@@ -791,7 +792,7 @@ app.post("/api/listings", async (req, res) => {
 
 app.put("/api/listings/:id", async (req, res) => {
   try {
-    const { title, description, price, stockCount } = req.body;
+    const { title, description, price, stockCount, isLocationMasked } = req.body;
     const stock = stockCount != null ? Number(stockCount) : 1;
     
     const updated = await Listing.findByIdAndUpdate(
@@ -801,7 +802,8 @@ app.put("/api/listings/:id", async (req, res) => {
         description, 
         price: Number(price || 0),
         stockCount: stock,
-        status: stock > 0 ? "active" : "sold"
+        status: stock > 0 ? "active" : "sold",
+        isLocationMasked: isLocationMasked !== undefined ? isLocationMasked : true
       },
       { new: true }
     );
