@@ -32,11 +32,6 @@ export const MARKETPLACE_CATEGORIES = {
     "Books & Music",
     "Collectibles & Art"
   ],
-  "Real Estate": [
-    "Rentals",
-    "For Sale",
-    "Commercial"
-  ],
   "Miscellaneous": [
     "Free Stuff",
     "Other"
