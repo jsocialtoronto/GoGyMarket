@@ -24,6 +24,9 @@ export default function ListingDetail({
   const [buyerAddress, setBuyerAddress] = useState(currentUser?.location || "");
   const [buyerPin, setBuyerPin] = useState("");
   const [specialInstructions, setSpecialInstructions] = useState("");
+  
+  // NEW: Address Masking State
+  const [isAddressMasked, setIsAddressMasked] = useState(true);
 
   const [shippingCost, setShippingCost] = useState(null);
   const [shippingDistance, setShippingDistance] = useState(null);
@@ -302,7 +305,6 @@ export default function ListingDetail({
                               className="text-emerald-600"
                             /> Pin Drop URL
                           </label>
-                          {/* NEW: Clickable Help Link */}
                           <button
                             type="button"
                             onClick={() => alert("How to get a Google Maps Pin URL:\n\n1. Open Google Maps.\n2. Zoom into your exact location.\n3. Press and hold on the map to drop a red pin.\n4. Swipe up and tap 'Share'.\n5. Copy the link and paste it here.")}
@@ -314,23 +316,29 @@ export default function ListingDetail({
                       </div>
 
                       <div className="flex flex-col sm:flex-row gap-2">
-                        {buyerLocationType === 'address' ? (
+                        {/* MASKED INPUT IMPLEMENTATION */}
+                        <div className="relative flex-1">
                           <input
-                            type="text"
-                            placeholder="e.g. 15 Eastdale Avenue, Toronto"
-                            value={buyerAddress}
-                            onChange={(e) => { setBuyerAddress(e.target.value); setShippingCost(null); }}
-                            className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                            type={isAddressMasked ? "password" : "text"}
+                            placeholder={buyerLocationType === 'address' ? "e.g. 15 Eastdale Avenue, Toronto" : "Paste Google Maps Pin URL here..."}
+                            value={buyerLocationType === 'address' ? buyerAddress : buyerPin}
+                            onChange={(e) => { 
+                              if (buyerLocationType === 'address') setBuyerAddress(e.target.value); 
+                              else setBuyerPin(e.target.value); 
+                              setShippingCost(null); 
+                            }}
+                            className="w-full border border-slate-300 rounded-lg px-3 py-2 pr-12 text-sm focus:outline-none focus:border-emerald-500"
                           />
-                        ) : (
-                          <input
-                            type="text"
-                            placeholder="Paste Google Maps Pin URL here..."
-                            value={buyerPin}
-                            onChange={(e) => { setBuyerPin(e.target.value); setShippingCost(null); }}
-                            className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
-                          />
-                        )}
+                          <button
+                            type="button"
+                            onClick={() => setIsAddressMasked(!isAddressMasked)}
+                            className="absolute right-3 top-2 text-lg text-slate-400 hover:text-slate-600"
+                            title={isAddressMasked ? "Show Address" : "Hide Address"}
+                          >
+                            {isAddressMasked ? "👁️" : "🙈"}
+                          </button>
+                        </div>
+
                         <button
                           onClick={handleCalculateShipping}
                           disabled={isCalculating || (buyerLocationType === 'address' ? !buyerAddress.trim() : !buyerPin.trim())}
