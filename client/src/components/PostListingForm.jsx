@@ -17,7 +17,6 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
     description: ""
   });
   
-  // NEW: Store base64 images directly
   const [images, setImages] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -31,7 +30,6 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
     });
   };
 
-  // Convert uploaded files to base64 strings to save to DB
   const handleImageUpload = (e) => {
     const files = Array.from(e.target.files);
     Promise.all(files.map(file => {
@@ -42,7 +40,8 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
         reader.readAsDataURL(file);
       });
     })).then(base64Images => {
-      setImages(prev => [...prev, ...base64Images].slice(0, 5)); // max 5 images
+      setImages(prev => [...prev, ...base64Images].slice(0, 5));
+      if (base64Images.length > 0) setError(""); // clear error if they finally uploaded
     }).catch(err => {
       setError("Failed to read image file.");
     });
@@ -57,6 +56,13 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
     setIsSubmitting(true);
     setError("");
 
+    // UPDATE: Enforce minimum of 1 picture
+    if (!images || images.length === 0) {
+      setError("At least 1 picture is required to post a listing.");
+      setIsSubmitting(false);
+      return;
+    }
+
     try {
       const payload = {
         sellerId: currentUser.id,
@@ -70,7 +76,7 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
         location: formData.location.trim(),
         isLocationMasked: formData.isLocationMasked,
         description: formData.description.trim(),
-        images: images // Send array of base64 strings
+        images: images 
       };
 
       const res = await fetch(`${API_BASE}/api/listings`, {
@@ -214,12 +220,12 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
         </div>
 
         <div>
-          <label className="block text-xs font-bold uppercase text-slate-700 mb-2">Upload Photos</label>
+          <label className="block text-xs font-bold uppercase text-slate-700 mb-2">Upload Photos *</label>
           
           <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 transition-colors">
              <span className="text-2xl mb-2">📸</span>
              <span className="text-sm font-bold text-emerald-700">Tap to Take Photo or Browse Library</span>
-             <span className="text-xs text-slate-500 mt-1">Up to 5 images</span>
+             <span className="text-xs text-slate-500 mt-1">Up to 5 images (At least 1 required)</span>
              <input 
                type="file" 
                accept="image/*" 
