@@ -25,8 +25,10 @@ export default function ListingDetail({
   const [buyerPin, setBuyerPin] = useState("");
   const [specialInstructions, setSpecialInstructions] = useState("");
   
-  // NEW: Address Masking State
   const [isAddressMasked, setIsAddressMasked] = useState(true);
+  
+  // NEW: Seller Address Mask State
+  const [isSellerAddressMasked, setIsSellerAddressMasked] = useState(true);
 
   const [shippingCost, setShippingCost] = useState(null);
   const [shippingDistance, setShippingDistance] = useState(null);
@@ -43,6 +45,7 @@ export default function ListingDetail({
     setDeliveryMethod("pickup");
     setShippingCost(null);
     setCalcError("");
+    setIsSellerAddressMasked(true); // reset mask on item change
   }, [listing._id]);
 
   useEffect(() => {
@@ -56,7 +59,6 @@ export default function ListingDetail({
     : ["https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&auto=format&fit=crop&q=80"];
 
   const isOwner = listing.sellerId === currentUser.id;
-  const isService = listing.category === "Services";
 
   const handleCalculateShipping = async () => {
     const destination = buyerLocationType === "pin" ? buyerPin : buyerAddress;
@@ -140,7 +142,7 @@ export default function ListingDetail({
         <div className="p-6 bg-slate-50/50 flex flex-col gap-4">
           <div className="w-full aspect-square bg-slate-100 rounded-xl overflow-hidden border border-slate-200 relative group">
             <img src={images[mainImageIndex]} alt={listing.title} className="w-full h-full object-contain bg-black/5" />
-            {!isService && availableStock === 1 && (
+            {availableStock === 1 && (
               <span className="absolute top-3 left-3 bg-red-600 text-white text-xs font-black px-3 py-1.5 rounded-full shadow-md animate-pulse">
                 🔥 ONLY 1 AVAILABLE!
               </span>
@@ -176,7 +178,18 @@ export default function ListingDetail({
 
               <div className="flex flex-wrap items-center gap-2 mt-3">
                 <div className="inline-flex items-center gap-1.5 bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200">
-                  <span>📍</span> <span>Origin: {listing.location}</span>
+                  <span>📍</span> 
+                  <span className="flex items-center gap-2">
+                    Origin: {isSellerAddressMasked ? "••••••••••••" : listing.location}
+                    <button
+                      type="button"
+                      onClick={() => setIsSellerAddressMasked(!isSellerAddressMasked)}
+                      className="text-slate-400 hover:text-slate-600 focus:outline-none"
+                      title={isSellerAddressMasked ? "Show Address" : "Hide Address"}
+                    >
+                      {isSellerAddressMasked ? "👁️" : "🙈"}
+                    </button>
+                  </span>
                 </div>
 
                 {listing.sellerRatingCount > 0 && (
@@ -185,17 +198,15 @@ export default function ListingDetail({
                   </div>
                 )}
 
-                {!isService && (
-                  <div
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold border ${
-                      availableStock === 1
-                        ? "bg-red-50 text-red-700 border-red-300"
-                        : "bg-emerald-50 text-emerald-800 border-emerald-200"
-                    }`}
-                  >
-                    {availableStock === 1 ? "🔥 Only 1 Available!" : `📦 ${availableStock} in stock`}
-                  </div>
-                )}
+                <div
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold border ${
+                    availableStock === 1
+                      ? "bg-red-50 text-red-700 border-red-300"
+                      : "bg-emerald-50 text-emerald-800 border-emerald-200"
+                  }`}
+                >
+                  {availableStock === 1 ? "🔥 Only 1 Available!" : `📦 ${availableStock} in stock`}
+                </div>
               </div>
             </div>
             <button
@@ -206,7 +217,7 @@ export default function ListingDetail({
             </button>
           </div>
 
-          {!isOwner && !isService && listing.status === "active" && remainingStockForUser > 0 && (
+          {!isOwner && listing.status === "active" && remainingStockForUser > 0 && (
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 mb-6 space-y-5">
               <div className="flex items-center justify-between pb-4 border-b border-slate-200">
                 <div>
@@ -251,7 +262,7 @@ export default function ListingDetail({
                       className="w-5 h-5 text-emerald-600 focus:ring-emerald-500"
                     />
                     <div>
-                      <p className="font-bold text-slate-900 text-sm">Option 1: Local Pickup in {listing.location}</p>
+                      <p className="font-bold text-slate-900 text-sm">Option 1: Local Pickup in Toronto (Origin)</p>
                       <p className="text-xs text-slate-500 font-medium">
                         Free • Arrange pickup & payment directly with seller via messaging
                       </p>
@@ -316,7 +327,6 @@ export default function ListingDetail({
                       </div>
 
                       <div className="flex flex-col sm:flex-row gap-2">
-                        {/* MASKED INPUT IMPLEMENTATION */}
                         <div className="relative flex-1">
                           <input
                             type={isAddressMasked ? "password" : "text"}
