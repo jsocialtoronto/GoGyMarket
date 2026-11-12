@@ -25,7 +25,6 @@ export default function App() {
   const [listings, setListings] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // NEW: State for live calculated distances on the Search feed
   const [itemDistances, setItemDistances] = useState({});
 
   const [favouriteIds, setFavouriteIds] = useState(() => {
@@ -537,11 +536,9 @@ export default function App() {
     }
   };
 
-  // UPDATE: Filter completely hides own listings and strictly caps to the 10 newest items.
   const filteredListings = useMemo(() => {
     let result = (listings || []).filter((item) => {
       if (!item) return false;
-      // Do not show the user their own listings in the public search feed
       if (currentUser && item.sellerId === currentUser.id) return false;
       
       const stock = item.stockCount != null ? Number(item.stockCount) : 1;
@@ -564,36 +561,53 @@ export default function App() {
     return result.slice(0, 10);
   }, [listings, searchQuery, selectedCat, selectedSubcat, minPrice, maxPrice, locationFilter, currentUser]);
 
-  // NEW: Effect strictly for querying live distances between the 10 filtered listings and the logged-in user
   useEffect(() => {
     if (!currentUser?.location || activeTab !== "search" || filteredListings.length === 0) return;
 
-    filteredListings.forEach(item => {
-      // If we haven't asked the server yet for this specific item's distance
-      if (itemDistances[item._id] === undefined) {
-        setItemDistances(prev => ({ ...prev, [item._id]: "Calculating..." }));
+    let isMounted = true; 
+
+    const fetchDistancesSequentially = async () => {
+      for (const item of filteredListings) {
+        if (!isMounted) break;
         
-        fetch(`${API_BASE}/api/shipping-quote`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            origin: item.location,
-            destination: currentUser.location // Compares seller to current buyer
-          })
-        })
-        .then(res => res.json())
-        .then(data => {
-          if (data.success) {
-            setItemDistances(prev => ({ ...prev, [item._id]: data.formattedDistance }));
-          } else {
+        if (itemDistances[item._id] !== undefined) continue;
+
+        setItemDistances(prev => ({ ...prev, [item._id]: "Calculating..." }));
+
+        try {
+          const res = await fetch(`${API_BASE}/api/shipping-quote`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              origin: item.location,
+              destination: currentUser.location 
+            })
+          });
+          
+          const data = await res.json();
+          
+          if (isMounted) {
+            if (data.success) {
+              setItemDistances(prev => ({ ...prev, [item._id]: data.formattedDistance }));
+            } else {
+              setItemDistances(prev => ({ ...prev, [item._id]: "Distance unknown" }));
+            }
+          }
+        } catch (err) {
+          if (isMounted) {
             setItemDistances(prev => ({ ...prev, [item._id]: "Distance unknown" }));
           }
-        })
-        .catch(() => {
-          setItemDistances(prev => ({ ...prev, [item._id]: "Distance unknown" }));
-        });
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
-    });
+    };
+
+    fetchDistancesSequentially();
+
+    return () => {
+      isMounted = false;
+    };
   }, [filteredListings, currentUser, activeTab]); 
 
   const myListings = (listings || []).filter((item) => item?.sellerId === currentUser?.id);
@@ -696,7 +710,6 @@ export default function App() {
         orders: myOrders?.length || 0
       }}
     >
-      {/* 1. STRICT DRIVER PORTAL RENDERING */}
       {isDriver ? (
         <>
           {activeTab === "driver" && (
@@ -955,8 +968,6 @@ export default function App() {
                     {filteredListings.map((item) => {
                       const isFav = favouriteIds.includes(item._id);
                       const stock = item.stockCount != null ? Number(item.stockCount) : 1;
-                      
-                      // NEW: Grab the pre-calculated distance if it exists in state
                       const distText = itemDistances[item._id] ? `${itemDistances[item._id]} away` : "Calculating...";
 
                       return (
