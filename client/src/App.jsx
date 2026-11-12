@@ -48,8 +48,6 @@ export default function App() {
   const [isProcessingOrder, setIsProcessingOrder] = useState(false);
   const [completedOrder, setCompletedOrder] = useState(null);
 
-  const [sellQuantities, setSellQuantities] = useState({});
-
   const [myOrders, setMyOrders] = useState([]);
   const [allRatings, setAllRatings] = useState([]);
   const [ratingStars, setRatingStars] = useState({});
@@ -107,7 +105,7 @@ export default function App() {
         }
       }
     } catch (err) {
-      console.error("Error loading data from Render:", err);
+      console.error("Error loading data:", err);
     } finally {
       setIsLoading(false);
     }
@@ -140,6 +138,39 @@ export default function App() {
       setIsLoading(false);
     }
   };
+
+  // NEW: Catch Stripe Redirects on Page Load
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get("session_id");
+    const orderId = params.get("order_id");
+    const isSuccess = params.get("payment_success");
+    const isCancelled = params.get("payment_cancelled");
+
+    if (isSuccess && sessionId && orderId) {
+      setIsProcessingOrder(true);
+      fetch(`${API_BASE}/api/orders/confirm-stripe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, orderId })
+      })
+      .then(res => res.json())
+      .then(data => {
+         if (data.success) {
+           setCart([]); // Clear cart after successful stripe payment
+           setActiveTab("orders");
+         }
+      })
+      .finally(() => {
+         window.history.replaceState({}, document.title, window.location.pathname);
+         setIsProcessingOrder(false);
+      });
+    } else if (isCancelled) {
+      setCheckoutError("Payment was cancelled at checkout. You can try again.");
+      setActiveTab("cart");
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
 
   useEffect(() => {
     if (currentUser) {
@@ -240,26 +271,56 @@ export default function App() {
     }
   };
 
-  const handleSellerMarkSold = async (e, item) => {
-    e.stopPropagation();
-    const qtyToSell = Number(sellQuantities[item._id] || 1);
+  const cartItemTotal = cart.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
+  const cartDeliveryTotal = cart.reduce((sum, item) => sum + Number(item.shippingCost || 0), 0);
+  const cartGrandTotal = cartItemTotal + cartDeliveryTotal;
+  const hasDeliveryItems = cart.some((item) => item.deliveryMethod === "delivery");
+
+  // NEW: Process Stripe Redirect Flow
+  const processStripeCheckout = async () => {
+    setIsProcessingOrder(true);
+    setCheckoutError("");
     try {
-      const res = await fetch(`${API_BASE}/api/listings/${item._id}/deduct-stock`, {
-        method: "PATCH",
+      const res = await fetch(`${API_BASE}/api/orders`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quantity: qtyToSell })
+        body: JSON.stringify({
+          buyerId: currentUser.id,
+          buyerName: currentUser.name,
+          buyerContact: currentUser.email || currentUser.phone || "N/A",
+          paymentMethod: "credit",
+          paymentOptionLabel: "Option 4: Delivery - Credit Card (Active & Paid)",
+          items: cart,
+          itemSubtotal: cartItemTotal,
+          deliveryTotal: cartDeliveryTotal,
+          grandTotal: cartGrandTotal,
+        })
       });
-      if (res.ok) {
-        const updated = await res.json();
-        setListings((prev) => prev.map((l) => (l._id === item._id ? updated : l)));
-        setSellQuantities((prev) => ({ ...prev, [item._id]: 1 }));
-      }
+
+      const savedOrder = await res.json();
+      if (!res.ok) throw new Error(savedOrder.error || "Could not create order");
+
+      const stripeRes = await fetch(`${API_BASE}/api/create-checkout-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: savedOrder._id,
+          items: cart,
+          deliveryTotal: cartDeliveryTotal,
+          domain: window.location.origin
+        })
+      });
+
+      const stripeData = await stripeRes.json();
+      if (!stripeRes.ok) throw new Error(stripeData.error || "Could not connect to Stripe");
+
+      // Redirect user completely off your site to the Stripe Checkout portal
+      window.location.href = stripeData.url;
     } catch (err) {
-      console.error("Failed to deduct stock:", err);
+      setCheckoutError("Failed to initiate Stripe checkout: " + err.message);
+      setIsProcessingOrder(false);
     }
   };
-
-  const hasDeliveryItems = cart.some((item) => item.deliveryMethod === "delivery");
 
   const finalizeOrder = async (paymentMethodCode, chosenMethodLabel) => {
     setIsProcessingOrder(true);
@@ -319,6 +380,12 @@ export default function App() {
       return;
     }
 
+    // UPDATE: Halt normal finalizeOrder flow and jump out to Stripe instead
+    if (deliveryPaymentMethod === "credit") {
+      processStripeCheckout();
+      return;
+    }
+
     if (deliveryPaymentMethod === "cash") {
       if (!cashVerifyStep) {
         setCashVerifyStep(true);
@@ -335,10 +402,6 @@ export default function App() {
     if (deliveryPaymentMethod === "etransfer") {
       finalizeOrder("etransfer", "Option 3: Delivery - eTransfer to gogymarket.com (Pending Admin Verification)");
       return;
-    }
-
-    if (deliveryPaymentMethod === "credit") {
-      finalizeOrder("credit", "Option 4: Delivery - Credit Card (Active & Paid)");
     }
   };
 
@@ -504,11 +567,6 @@ export default function App() {
   const favouriteListings = (listings || []).filter((item) => favouriteIds.includes(item?._id));
   const activeConversation = conversations?.find((c) => c?._id === activeConvId);
 
-  const cartItemTotal = cart.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
-  const cartDeliveryTotal = cart.reduce((sum, item) => sum + Number(item.shippingCost || 0), 0);
-  const cartGrandTotal = cartItemTotal + cartDeliveryTotal;
-
-  // CRASH-PROOFED: Extensively wrapped all mapping calls with optional chaining to prevent white screens
   const renderMessagesTab = () => (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden grid grid-cols-1 md:grid-cols-3 min-h-[480px]">
       <div className="border-r border-slate-200 p-4 space-y-2 overflow-y-auto max-h-[480px]">
@@ -605,7 +663,6 @@ export default function App() {
         orders: myOrders?.length || 0
       }}
     >
-      {/* 1. STRICT DRIVER PORTAL RENDERING */}
       {isDriver ? (
         <>
           {activeTab === "driver" && (
@@ -699,14 +756,10 @@ export default function App() {
           )}
           {activeTab === "messages" && renderMessagesTab()}
         </>
-
-      /* 2. STRICT ADMIN PORTAL RENDERING */
       ) : isStaff ? (
         activeTab === "admin" && (
           <AdminDashboard currentUser={currentUser} onOrdersUpdated={loadMarketplaceData} />
         )
-
-      /* 3. PRODUCT DETAIL VIEW */
       ) : selectedListing ? (
         <ListingDetail
           listing={selectedListing}
@@ -724,8 +777,6 @@ export default function App() {
           currentUser={currentUser}
           activeTab={activeTab} 
         />
-
-      /* 4. REGULAR USER MARKETPLACE TABS */
       ) : (
         <>
           {activeTab === "search" && (
