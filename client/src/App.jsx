@@ -25,6 +25,9 @@ export default function App() {
   const [listings, setListings] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // NEW: State for live calculated distances on the Search feed
+  const [itemDistances, setItemDistances] = useState({});
+
   const [favouriteIds, setFavouriteIds] = useState(() => {
     try {
       const saved = localStorage.getItem("gogy_favs");
@@ -139,7 +142,6 @@ export default function App() {
     }
   };
 
-  // NEW: Catch Stripe Redirects on Page Load
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sessionId = params.get("session_id");
@@ -157,7 +159,7 @@ export default function App() {
       .then(res => res.json())
       .then(data => {
          if (data.success) {
-           setCart([]); // Clear cart after successful stripe payment
+           setCart([]);
            setActiveTab("orders");
          }
       })
@@ -276,7 +278,6 @@ export default function App() {
   const cartGrandTotal = cartItemTotal + cartDeliveryTotal;
   const hasDeliveryItems = cart.some((item) => item.deliveryMethod === "delivery");
 
-  // NEW: Process Stripe Redirect Flow
   const processStripeCheckout = async () => {
     setIsProcessingOrder(true);
     setCheckoutError("");
@@ -314,7 +315,6 @@ export default function App() {
       const stripeData = await stripeRes.json();
       if (!stripeRes.ok) throw new Error(stripeData.error || "Could not connect to Stripe");
 
-      // Redirect user completely off your site to the Stripe Checkout portal
       window.location.href = stripeData.url;
     } catch (err) {
       setCheckoutError("Failed to initiate Stripe checkout: " + err.message);
@@ -374,18 +374,14 @@ export default function App() {
 
   const handleCheckoutSubmit = () => {
     setCheckoutError("");
-
     if (!hasDeliveryItems) {
       finalizeOrder("pickup", "Option 1: Local Pickup (Pay & Pickup with Seller)");
       return;
     }
-
-    // UPDATE: Halt normal finalizeOrder flow and jump out to Stripe instead
     if (deliveryPaymentMethod === "credit") {
       processStripeCheckout();
       return;
     }
-
     if (deliveryPaymentMethod === "cash") {
       if (!cashVerifyStep) {
         setCashVerifyStep(true);
@@ -398,7 +394,6 @@ export default function App() {
       finalizeOrder("cash", "Option 2: Delivery - Cash in Lockbox (Pending Admin Confirmation)");
       return;
     }
-
     if (deliveryPaymentMethod === "etransfer") {
       finalizeOrder("etransfer", "Option 3: Delivery - eTransfer to gogymarket.com (Pending Admin Verification)");
       return;
@@ -542,9 +537,13 @@ export default function App() {
     }
   };
 
+  // UPDATE: Filter completely hides own listings and strictly caps to the 10 newest items.
   const filteredListings = useMemo(() => {
-    return (listings || []).filter((item) => {
+    let result = (listings || []).filter((item) => {
       if (!item) return false;
+      // Do not show the user their own listings in the public search feed
+      if (currentUser && item.sellerId === currentUser.id) return false;
+      
       const stock = item.stockCount != null ? Number(item.stockCount) : 1;
       if (item.status === "sold" || stock <= 0) return false;
 
@@ -561,7 +560,41 @@ export default function App() {
 
       return matchesKeyword && matchesCat && matchesSub && matchesMinPrice && matchesMaxPrice && matchesLocation;
     });
-  }, [listings, searchQuery, selectedCat, selectedSubcat, minPrice, maxPrice, locationFilter]);
+
+    return result.slice(0, 10);
+  }, [listings, searchQuery, selectedCat, selectedSubcat, minPrice, maxPrice, locationFilter, currentUser]);
+
+  // NEW: Effect strictly for querying live distances between the 10 filtered listings and the logged-in user
+  useEffect(() => {
+    if (!currentUser?.location || activeTab !== "search" || filteredListings.length === 0) return;
+
+    filteredListings.forEach(item => {
+      // If we haven't asked the server yet for this specific item's distance
+      if (itemDistances[item._id] === undefined) {
+        setItemDistances(prev => ({ ...prev, [item._id]: "Calculating..." }));
+        
+        fetch(`${API_BASE}/api/shipping-quote`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            origin: item.location,
+            destination: currentUser.location // Compares seller to current buyer
+          })
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            setItemDistances(prev => ({ ...prev, [item._id]: data.formattedDistance }));
+          } else {
+            setItemDistances(prev => ({ ...prev, [item._id]: "Distance unknown" }));
+          }
+        })
+        .catch(() => {
+          setItemDistances(prev => ({ ...prev, [item._id]: "Distance unknown" }));
+        });
+      }
+    });
+  }, [filteredListings, currentUser, activeTab]); 
 
   const myListings = (listings || []).filter((item) => item?.sellerId === currentUser?.id);
   const favouriteListings = (listings || []).filter((item) => favouriteIds.includes(item?._id));
@@ -663,6 +696,7 @@ export default function App() {
         orders: myOrders?.length || 0
       }}
     >
+      {/* 1. STRICT DRIVER PORTAL RENDERING */}
       {isDriver ? (
         <>
           {activeTab === "driver" && (
@@ -921,7 +955,9 @@ export default function App() {
                     {filteredListings.map((item) => {
                       const isFav = favouriteIds.includes(item._id);
                       const stock = item.stockCount != null ? Number(item.stockCount) : 1;
-                      const isSellerMasked = item.isLocationMasked !== false;
+                      
+                      // NEW: Grab the pre-calculated distance if it exists in state
+                      const distText = itemDistances[item._id] ? `${itemDistances[item._id]} away` : "Calculating...";
 
                       return (
                         <div
@@ -948,7 +984,7 @@ export default function App() {
                               <h3 className="font-bold text-sm text-slate-900 line-clamp-2 mt-0.5 group-hover:text-emerald-700">{item.title}</h3>
                             </div>
                             <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                              <span className="truncate max-w-[100px]">📍 {isSellerMasked && currentUser?.id !== item.sellerId ? "Hidden for Privacy" : item.location}</span>
+                              <span className="truncate max-w-[120px] font-semibold text-emerald-700">📍 {distText}</span>
                               {item.sellerRatingCount > 0 ? (
                                 <span className="font-bold text-yellow-600">⭐ {item.sellerRating}</span>
                               ) : (
@@ -1235,9 +1271,6 @@ export default function App() {
               )}
             </div>
           )}
-
-          {/* User Messages Tab */}
-          {activeTab === "messages" && renderMessagesTab()}
 
           {activeTab === "post" && (
             <PostListingForm
