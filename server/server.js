@@ -6,7 +6,6 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
 
-// NEW: Initialize Stripe
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
@@ -121,7 +120,6 @@ const orderSchema = new mongoose.Schema(
     paymentOptionLabel: { type: String, required: true },
     status: {
       type: String,
-      // UPDATE: Added pending_payment for active Stripe checkouts
       enum: [
         "pending_payment", 
         "waiting_etransfer",
@@ -356,7 +354,7 @@ app.post("/api/orders", async (req, res) => {
     if (paymentMethod === "etransfer") initialStatus = "waiting_etransfer";
     else if (paymentMethod === "cash") initialStatus = "waiting_cash";
     else if (paymentMethod === "pickup") initialStatus = "pickup_pending";
-    else if (paymentMethod === "credit") initialStatus = "pending_payment"; // Wait for Stripe
+    else if (paymentMethod === "credit") initialStatus = "pending_payment";
 
     const orderNumber = "ORD-" + Math.floor(100000 + Math.random() * 900000);
     let requiresDriver = false;
@@ -403,7 +401,6 @@ app.post("/api/orders", async (req, res) => {
       const itemTotal = item.unitPrice * item.quantity;
       let msg = "";
       
-      // We DO NOT notify sellers of Credit Card orders yet. We wait for Stripe to confirm it!
       if (paymentMethod === "credit") {
         continue; 
       }
@@ -429,7 +426,6 @@ app.post("/api/orders", async (req, res) => {
   }
 });
 
-// NEW: Create Stripe Checkout Session
 app.post("/api/create-checkout-session", async (req, res) => {
   try {
     const { orderId, items, deliveryTotal, domain } = req.body;
@@ -438,7 +434,6 @@ app.post("/api/create-checkout-session", async (req, res) => {
       return res.status(500).json({ error: "Stripe key is not configured on the server." });
     }
 
-    // Convert items into Stripe Line Items format using CAD to avoid zero-decimal bugs in test mode
     const lineItems = items.map(item => ({
       price_data: {
         currency: 'cad', 
@@ -473,7 +468,6 @@ app.post("/api/create-checkout-session", async (req, res) => {
   }
 });
 
-// NEW: Confirm Stripe Payment & Activate Order
 app.post("/api/orders/confirm-stripe", async (req, res) => {
   try {
     const { sessionId, orderId } = req.body;
@@ -491,7 +485,6 @@ app.post("/api/orders/confirm-stripe", async (req, res) => {
         order.status = "active";
         await order.save();
 
-        // Dispatch the success notifications to sellers now that payment cleared!
         for (const item of order.items) {
           const itemTotal = item.unitPrice * item.quantity;
           const msg = `✅ ORDER ${order.orderNumber} ACTIVE & PAID (Credit Card)\nItem: ${item.quantity}x ${item.title}\nItem Total: $${itemTotal.toLocaleString()} GYD\nDelivery Fee: $${item.shippingCost.toLocaleString()} GYD\n\nPayment is complete! Seller ${item.sellerName}, please prepare this item for delivery pickup.`;
@@ -1009,20 +1002,28 @@ app.delete("/api/conversations/:id", async (req, res) => {
   }
 });
 
+// UPDATE: More aggressive unwrapping for Google short links and /place/ URL parsing
 async function formatWaypoint(inputStr) {
   if (!inputStr || typeof inputStr !== "string") return { address: "Toronto, ON" };
 
   let urlToTest = inputStr;
   
-  if (inputStr.includes("maps.app.goo.gl") || inputStr.includes("goo.gl")) {
+  if (inputStr.includes("maps.app.goo.gl") || inputStr.includes("goo.gl") || inputStr.includes("maps.google.com")) {
     try {
-      const response = await fetch(inputStr, { method: "HEAD", redirect: "follow" });
+      const response = await fetch(inputStr, { 
+        method: "GET", 
+        redirect: "follow",
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" // Prevents basic bot blocks
+        }
+      });
       urlToTest = response.url;
     } catch (e) {
       console.error("Failed to unwrap short URL:", e);
     }
   }
 
+  // 1. Try to extract exact Map Coordinates
   const pinMatch = urlToTest.match(/3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
   if (pinMatch) return { location: { latLng: { latitude: parseFloat(pinMatch[1]), longitude: parseFloat(pinMatch[2]) } } };
   
@@ -1035,6 +1036,15 @@ async function formatWaypoint(inputStr) {
   const rawMatch = urlToTest.match(/^(-?\d+\.\d+),\s*(-?\d+\.\d+)$/);
   if (rawMatch) return { location: { latLng: { latitude: parseFloat(rawMatch[1]), longitude: parseFloat(rawMatch[2]) } } };
 
+  // 2. Try to extract the literal address string from an expanded /place/ URL
+  const placeMatch = urlToTest.match(/\/place\/([^\/]+)/);
+  if (placeMatch) {
+    let decoded = decodeURIComponent(placeMatch[1]).replace(/\+/g, " ");
+    if (decoded.includes("@")) decoded = decoded.split("@")[0];
+    return { address: decoded };
+  }
+
+  // If none match, assume they just typed in an address natively
   return { address: inputStr };
 }
 
