@@ -6,6 +6,9 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
 
+// NEW: Initialize Stripe
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+
 const app = express();
 
 app.use(
@@ -66,7 +69,7 @@ const listingSchema = new mongoose.Schema(
     price: { type: Number, default: 0 },
     stockCount: { type: Number, required: true, default: 1, min: 0 },
     location: { type: String, required: true },
-    isLocationMasked: { type: Boolean, default: true }, // NEW: Seller Location Privacy
+    isLocationMasked: { type: Boolean, default: true }, 
     deliveryMethods: { type: [String], default: ["pickup"] },
     deliveryFee: { type: Number, default: 0 },
     description: { type: String, required: true },
@@ -118,7 +121,9 @@ const orderSchema = new mongoose.Schema(
     paymentOptionLabel: { type: String, required: true },
     status: {
       type: String,
+      // UPDATE: Added pending_payment for active Stripe checkouts
       enum: [
+        "pending_payment", 
         "waiting_etransfer",
         "waiting_cash",
         "active",
@@ -336,7 +341,7 @@ app.post("/api/auth/login", async (req, res) => {
 });
 
 // ==========================================
-// 4. ORDER, RATING & CHECKOUT ROUTES
+// 4. ORDER, RATING, CHECKOUT & STRIPE ROUTES
 // ==========================================
 
 app.post("/api/orders", async (req, res) => {
@@ -351,6 +356,7 @@ app.post("/api/orders", async (req, res) => {
     if (paymentMethod === "etransfer") initialStatus = "waiting_etransfer";
     else if (paymentMethod === "cash") initialStatus = "waiting_cash";
     else if (paymentMethod === "pickup") initialStatus = "pickup_pending";
+    else if (paymentMethod === "credit") initialStatus = "pending_payment"; // Wait for Stripe
 
     const orderNumber = "ORD-" + Math.floor(100000 + Math.random() * 900000);
     let requiresDriver = false;
@@ -396,24 +402,111 @@ app.post("/api/orders", async (req, res) => {
     for (const item of formattedItems) {
       const itemTotal = item.unitPrice * item.quantity;
       let msg = "";
+      
+      // We DO NOT notify sellers of Credit Card orders yet. We wait for Stripe to confirm it!
+      if (paymentMethod === "credit") {
+        continue; 
+      }
+
       if (paymentMethod === "pickup") {
         msg = `🧾 ORDER ${orderNumber} (Option 1: Local Pickup)\nItem: ${item.quantity}x ${item.title}\nItem Total: $${itemTotal.toLocaleString()} GYD\n\nBuyer ${buyerName} selected Local Pickup. Please coordinate pickup time and payment directly in this chat.`;
-      } else if (paymentMethod === "credit") {
-        msg = `✅ ORDER ${orderNumber} ACTIVE & PAID (Credit Card)\nItem: ${item.quantity}x ${item.title}\nItem Total: $${itemTotal.toLocaleString()} GYD\nDelivery Fee: $${item.shippingCost.toLocaleString()} GYD\n\nPayment is complete! Seller ${item.sellerName}, please prepare this item for delivery pickup.`;
       } else if (paymentMethod === "etransfer") {
         msg = `⏳ ORDER ${orderNumber} PENDING ADMIN VERIFICATION (eTransfer to gogymarket.com)\nItem: ${item.quantity}x ${item.title}\nTotal Due: $${(itemTotal + item.shippingCost).toLocaleString()} GYD\n\nOnce GoGyMarket Admin verifies the eTransfer, the seller will be notified that the item is ready for pickup.`;
       } else if (paymentMethod === "cash") {
         msg = `⏳ ORDER ${orderNumber} PENDING ADMIN CASH CONFIRMATION (Lockbox Photo Uploaded)\nItem: ${item.quantity}x ${item.title}\nTotal Due: $${(itemTotal + item.shippingCost).toLocaleString()} GYD\n\nOnce GoGyMarket Admin confirms the cash lockbox photo, the seller will be notified that the item is ready for pickup.`;
       }
 
-      await sendOrderNotification({
-        listingId: item.listingId, listingTitle: item.title, buyerName, sellerName: item.sellerName, text: msg
-      });
+      if (msg) {
+        await sendOrderNotification({
+          listingId: item.listingId, listingTitle: item.title, buyerName, sellerName: item.sellerName, text: msg
+        });
+      }
     }
 
     res.status(201).json(newOrder);
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// NEW: Create Stripe Checkout Session
+app.post("/api/create-checkout-session", async (req, res) => {
+  try {
+    const { orderId, items, deliveryTotal, domain } = req.body;
+
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return res.status(500).json({ error: "Stripe key is not configured on the server." });
+    }
+
+    // Convert items into Stripe Line Items format using CAD to avoid zero-decimal bugs in test mode
+    const lineItems = items.map(item => ({
+      price_data: {
+        currency: 'cad', 
+        product_data: { name: item.title },
+        unit_amount: Math.round((item.price || item.unitPrice) * 100), 
+      },
+      quantity: item.quantity || 1,
+    }));
+
+    if (deliveryTotal > 0) {
+      lineItems.push({
+        price_data: {
+          currency: 'cad',
+          product_data: { name: "Delivery Fee" },
+          unit_amount: Math.round(deliveryTotal * 100),
+        },
+        quantity: 1,
+      });
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: lineItems,
+      mode: 'payment',
+      success_url: `${domain}?session_id={CHECKOUT_SESSION_ID}&order_id=${orderId}&payment_success=true`,
+      cancel_url: `${domain}?payment_cancelled=true`,
+    });
+
+    res.json({ url: session.url });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// NEW: Confirm Stripe Payment & Activate Order
+app.post("/api/orders/confirm-stripe", async (req, res) => {
+  try {
+    const { sessionId, orderId } = req.body;
+    
+    if (!process.env.STRIPE_SECRET_KEY) {
+       return res.status(500).json({ error: "Stripe key missing."});
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+    if (session.payment_status === 'paid') {
+      const order = await Order.findById(orderId);
+      
+      if (order && order.status === "pending_payment") {
+        order.status = "active";
+        await order.save();
+
+        // Dispatch the success notifications to sellers now that payment cleared!
+        for (const item of order.items) {
+          const itemTotal = item.unitPrice * item.quantity;
+          const msg = `✅ ORDER ${order.orderNumber} ACTIVE & PAID (Credit Card)\nItem: ${item.quantity}x ${item.title}\nItem Total: $${itemTotal.toLocaleString()} GYD\nDelivery Fee: $${item.shippingCost.toLocaleString()} GYD\n\nPayment is complete! Seller ${item.sellerName}, please prepare this item for delivery pickup.`;
+          
+          await sendOrderNotification({
+            listingId: item.listingId, listingTitle: item.title, buyerName: order.buyerName, sellerName: item.sellerName, text: msg
+          });
+        }
+      }
+      res.json({ success: true, order });
+    } else {
+      res.status(400).json({ error: "Stripe payment not completed" });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
