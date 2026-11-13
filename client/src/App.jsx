@@ -931,13 +931,16 @@ export default function App() {
                 <div className="pt-3 border-t border-slate-200">
                   <button
                     onClick={() => setActiveTab("post")}
-                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-2.5 px-3 rounded-lg shadow-sm"
+                    disabled={currentUser?.canPostListings === false}
+                    className={`w-full font-bold text-xs py-2.5 px-3 rounded-lg shadow-sm ${
+                      currentUser?.canPostListings === false 
+                        ? "bg-slate-300 text-slate-500 cursor-not-allowed" 
+                        : "bg-emerald-600 hover:bg-emerald-500 text-white"
+                    }`}
                   >
-                    {selectedSubcat
-                      ? `+ Post in ${selectedSubcat}`
-                      : selectedCat
-                      ? `+ Post in ${selectedCat}`
-                      : "+ Post a New Listing"}
+                    {currentUser?.canPostListings === false 
+                      ? "🚫 Posting Restricted" 
+                      : (selectedSubcat ? `+ Post in ${selectedSubcat}` : "+ Post a New Listing")}
                   </button>
                 </div>
               </aside>
@@ -1299,7 +1302,17 @@ export default function App() {
                   <h2 className="text-xl font-bold">My Listings</h2>
                   <p className="text-xs text-slate-500">Edit or manage the items you have listed on GoGyMarket.</p>
                 </div>
-                <button onClick={() => setActiveTab("post")} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2.5 rounded-lg shadow-sm">+ Post Another Listing</button>
+                <button 
+                  onClick={() => setActiveTab("post")} 
+                  disabled={currentUser?.canPostListings === false}
+                  className={`text-xs font-bold px-4 py-2.5 rounded-lg shadow-sm ${
+                    currentUser?.canPostListings === false
+                      ? "bg-slate-300 text-slate-500 cursor-not-allowed" 
+                      : "bg-emerald-600 hover:bg-emerald-500 text-white"
+                  }`}
+                >
+                  {currentUser?.canPostListings === false ? "🚫 Posting Restricted" : "+ Post Another Listing"}
+                </button>
               </div>
               <div className="space-y-3">
                 {(!myListings || myListings.length === 0) ? (
