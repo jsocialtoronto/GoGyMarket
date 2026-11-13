@@ -45,7 +45,6 @@ const userSchema = new mongoose.Schema(
     location: { type: String, required: true, default: "Toronto, ON" },
     averageRating: { type: Number, default: 0 },
     ratingCount: { type: Number, default: 0 },
-    // NEW: Permission toggle for posting listings
     canPostListings: { type: Boolean, default: true }
   },
   { timestamps: true }
@@ -71,6 +70,7 @@ const listingSchema = new mongoose.Schema(
     stockCount: { type: Number, required: true, default: 1, min: 0 },
     location: { type: String, required: true },
     isLocationMasked: { type: Boolean, default: true }, 
+    isOversized: { type: Boolean, default: false }, // NEW: Oversized flag
     deliveryMethods: { type: [String], default: ["pickup"] },
     deliveryFee: { type: Number, default: 0 },
     description: { type: String, required: true },
@@ -156,6 +156,7 @@ const orderSchema = new mongoose.Schema(
         buyerAddress: { type: String, default: "" },
         buyerPin: { type: String, default: "" },
         specialInstructions: { type: String, default: "" },
+        isOversized: { type: Boolean, default: false },
         image: { type: String }
       }
     ],
@@ -391,6 +392,7 @@ app.post("/api/orders", async (req, res) => {
       buyerAddress: i.buyerAddress || "",
       buyerPin: i.buyerPin || "",
       specialInstructions: i.specialInstructions || "",
+      isOversized: i.isOversized || false,
       image: i.images?.[0] || i.image || ""
     }));
 
@@ -753,13 +755,11 @@ app.patch("/api/admin/users/:id/reset-password", verifyStaff, requireFullAdmin, 
   }
 });
 
-// NEW: Toggle Posting Privileges (Admin Only)
 app.patch("/api/admin/users/:id/toggle-posting", verifyStaff, requireFullAdmin, async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ error: "User not found." });
     
-    // Default undefined to true, then flip it
     const currentStatus = user.canPostListings !== false;
     user.canPostListings = !currentStatus;
     
@@ -883,7 +883,6 @@ app.get("/api/listings", async (req, res) => {
 
 app.post("/api/listings", async (req, res) => {
   try {
-    // SECURITY BLOCK: Check if the user is allowed to post
     const seller = await User.findById(req.body.sellerId);
     if (!seller) return res.status(404).json({ error: "Seller account not found." });
     if (seller.canPostListings === false) {
@@ -897,7 +896,8 @@ app.post("/api/listings", async (req, res) => {
       status: stock > 0 ? "active" : "sold",
       sellerRating: seller.averageRating || 0,
       sellerRatingCount: seller.ratingCount || 0,
-      isLocationMasked: req.body.isLocationMasked !== undefined ? req.body.isLocationMasked : true
+      isLocationMasked: req.body.isLocationMasked !== undefined ? req.body.isLocationMasked : true,
+      isOversized: req.body.isOversized || false // Extract flag
     });
     res.status(201).json(newListing);
   } catch (err) {
@@ -907,7 +907,7 @@ app.post("/api/listings", async (req, res) => {
 
 app.put("/api/listings/:id", async (req, res) => {
   try {
-    const { title, description, price, stockCount, isLocationMasked } = req.body;
+    const { title, description, price, stockCount, isLocationMasked, isOversized } = req.body;
     const stock = stockCount != null ? Number(stockCount) : 1;
     
     const updated = await Listing.findByIdAndUpdate(
@@ -918,7 +918,8 @@ app.put("/api/listings/:id", async (req, res) => {
         price: Number(price || 0),
         stockCount: stock,
         status: stock > 0 ? "active" : "sold",
-        isLocationMasked: isLocationMasked !== undefined ? isLocationMasked : true
+        isLocationMasked: isLocationMasked !== undefined ? isLocationMasked : true,
+        isOversized: isOversized !== undefined ? isOversized : false
       },
       { new: true }
     );
@@ -1073,9 +1074,10 @@ async function formatWaypoint(inputStr) {
   return { address: inputStr };
 }
 
+// NEW: Dynamically update calculation math based on the Oversized flag
 app.post("/api/shipping-quote", async (req, res) => {
   try {
-    const { origin, destination } = req.body;
+    const { origin, destination, isOversized } = req.body;
     if (!process.env.GOOGLE_MAPS_API_KEY) return res.status(500).json({ error: "Google Maps API key missing." });
     
     const mapUrl = "https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix";
@@ -1102,7 +1104,10 @@ app.post("/api/shipping-quote", async (req, res) => {
     if (Array.isArray(data) && data.length > 0) {
       if (data[0].distanceMeters != null) {
         const distanceKm = Math.ceil(data[0].distanceMeters / 1000);
-        return res.json({ success: true, distanceKm, shippingCost: distanceKm * 20, formattedDistance: `${distanceKm} km` });
+        const ratePerKm = isOversized ? 30 : 20;
+        const shippingCost = distanceKm * ratePerKm;
+
+        return res.json({ success: true, distanceKm, shippingCost, formattedDistance: `${distanceKm} km` });
       } else if (data[0].status && data[0].status.message) {
         return res.status(400).json({ error: `Google Maps: ${data[0].status.message}` });
       }
