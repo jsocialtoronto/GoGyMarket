@@ -11,10 +11,11 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
     subcategory: initialSubcategory || MARKETPLACE_CATEGORIES[initialCategory || Object.keys(MARKETPLACE_CATEGORIES)[0]][0],
     pricingType: "fixed",
     price: "",
+    condition: "New", // NEW
     stockCount: 1,
     location: currentUser?.location || "Toronto, ON",
     isLocationMasked: true,
-    isOversized: false, // NEW
+    isOversized: false, 
     description: ""
   });
   
@@ -72,10 +73,11 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
         subcategory: formData.subcategory,
         pricingType: formData.pricingType,
         price: Number(formData.price || 0),
+        condition: formData.condition, // Added payload mapping
         stockCount: Math.max(1, Number(formData.stockCount || 1)),
         location: formData.location.trim(),
         isLocationMasked: formData.isLocationMasked,
-        isOversized: formData.isOversized, // Add to payload
+        isOversized: formData.isOversized, 
         description: formData.description.trim(),
         images: images 
       };
@@ -151,11 +153,10 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold bg-white focus:border-emerald-500 focus:outline-none"
             >
               <option value="fixed">Fixed Price</option>
-              <option value="hourly">Hourly Rate</option>
               <option value="free">Free Item</option>
             </select>
           </div>
-          <div className="sm:col-span-2">
+          <div>
             <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
               Price (GYD) {formData.pricingType !== "free" ? "*" : ""}
             </label>
@@ -169,6 +170,18 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold focus:border-emerald-500 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400" 
               placeholder="0.00" 
             />
+          </div>
+          <div>
+            <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Condition *</label>
+            <select 
+              value={formData.condition} 
+              onChange={e => setFormData({...formData, condition: e.target.value})} 
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold bg-white focus:border-emerald-500 focus:outline-none"
+            >
+              <option value="New">New</option>
+              <option value="Used - Good">Used - Good</option>
+              <option value="Used - Fair">Used - Fair</option>
+            </select>
           </div>
         </div>
 
@@ -208,7 +221,6 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
           </label>
         </div>
 
-        {/* NEW: Oversized Item Form Section */}
         <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl space-y-3 mt-2">
           <p className="text-xs text-amber-900 font-semibold leading-relaxed">
             <span className="font-black">DELIVERY OVERSIZE CHARGE:</span> Items that can not fit in 15 inch x 10 inch x 10 inch container will be charged an extra delivery cost. Delivery cost is $20/km for first container (buyer pays) + $10/km for all additional containers (seller pays) required to ship your product.
