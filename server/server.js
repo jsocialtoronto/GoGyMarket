@@ -63,14 +63,23 @@ const listingSchema = new mongoose.Schema(
     subcategory: { type: String, required: true, index: true },
     pricingType: {
       type: String,
-      enum: ["fixed", "hourly", "free"],
+      enum: ["fixed", "free"], // REMOVED HOURLY
       default: "fixed"
     },
     price: { type: Number, default: 0 },
     stockCount: { type: Number, required: true, default: 1, min: 0 },
+    
+    // NEW: Condition Field
+    condition: { 
+      type: String, 
+      enum: ["New", "Used - Good", "Used - Fair"], 
+      required: true,
+      default: "New"
+    },
+
     location: { type: String, required: true },
     isLocationMasked: { type: Boolean, default: true }, 
-    isOversized: { type: Boolean, default: false }, // NEW: Oversized flag
+    isOversized: { type: Boolean, default: false }, 
     deliveryMethods: { type: [String], default: ["pickup"] },
     deliveryFee: { type: Number, default: 0 },
     description: { type: String, required: true },
@@ -897,7 +906,7 @@ app.post("/api/listings", async (req, res) => {
       sellerRating: seller.averageRating || 0,
       sellerRatingCount: seller.ratingCount || 0,
       isLocationMasked: req.body.isLocationMasked !== undefined ? req.body.isLocationMasked : true,
-      isOversized: req.body.isOversized || false // Extract flag
+      isOversized: req.body.isOversized || false 
     });
     res.status(201).json(newListing);
   } catch (err) {
@@ -907,7 +916,7 @@ app.post("/api/listings", async (req, res) => {
 
 app.put("/api/listings/:id", async (req, res) => {
   try {
-    const { title, description, price, stockCount, isLocationMasked, isOversized } = req.body;
+    const { title, description, price, stockCount, isLocationMasked, isOversized, condition } = req.body;
     const stock = stockCount != null ? Number(stockCount) : 1;
     
     const updated = await Listing.findByIdAndUpdate(
@@ -919,7 +928,8 @@ app.put("/api/listings/:id", async (req, res) => {
         stockCount: stock,
         status: stock > 0 ? "active" : "sold",
         isLocationMasked: isLocationMasked !== undefined ? isLocationMasked : true,
-        isOversized: isOversized !== undefined ? isOversized : false
+        isOversized: isOversized !== undefined ? isOversized : false,
+        condition
       },
       { new: true }
     );
@@ -1074,7 +1084,6 @@ async function formatWaypoint(inputStr) {
   return { address: inputStr };
 }
 
-// NEW: Dynamically update calculation math based on the Oversized flag
 app.post("/api/shipping-quote", async (req, res) => {
   try {
     const { origin, destination, isOversized } = req.body;
