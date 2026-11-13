@@ -217,12 +217,34 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
     }
   };
 
+  // NEW: Toggle user's ability to post listings
+  const handleTogglePosting = async (userObj) => {
+    if (!isFullAdmin) return;
+    setFeedback({ type: "", text: "" });
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/users/${userObj._id}/toggle-posting`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update posting permissions");
+
+      setUsers((prev) => prev.map((u) => u._id === userObj._id ? { ...u, canPostListings: data.canPostListings } : u));
+      setFeedback({ type: "success", text: data.message });
+    } catch (err) {
+      setFeedback({ type: "error", text: err.message });
+    }
+  };
+
   const getStatusBadge = (status, paymentMethod) => {
     switch (status) {
       case "waiting_etransfer":
         return <span className="bg-amber-100 text-amber-800 border border-amber-300 text-xs font-extrabold px-2.5 py-1 rounded-full">⏳ Waiting on Payment for eTransfer</span>;
       case "waiting_cash":
         return <span className="bg-blue-100 text-blue-800 border border-blue-300 text-xs font-extrabold px-2.5 py-1 rounded-full">📸 Waiting on Confirmation of Cash</span>;
+      case "pending_payment":
+        return <span className="bg-orange-100 text-orange-800 border border-orange-300 text-xs font-extrabold px-2.5 py-1 rounded-full">💳 Incomplete Checkout (Stripe)</span>;
       case "active":
         return <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-extrabold px-2.5 py-1 rounded-full">✅ Active & Paid {paymentMethod === "credit" ? "(Stripe Auto)" : "(Admin Verified)"}</span>;
       case "pickup_pending":
@@ -289,6 +311,7 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
             <div className="flex flex-wrap gap-2">
               {[
                 { id: "all", label: "All Transactions" },
+                { id: "pending_payment", label: "💳 Stripe Checkout" },
                 { id: "waiting_etransfer", label: "⏳ Waiting on eTransfer" },
                 { id: "waiting_cash", label: "📸 Waiting on Cash" },
                 { id: "active", label: "✅ Active & Paid" },
@@ -333,7 +356,6 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
                         <p className="text-xl font-black text-emerald-700">${Number(order.grandTotal).toLocaleString()} GYD</p>
                         <p className="text-[11px] text-slate-500">{order.paymentOptionLabel}</p>
                       </div>
-                      {/* NEW: Driver Dispatch Status */}
                       {order.dispatchStatus === "pending" && (
                         <span className="bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded shadow-sm">
                           ⏳ Waiting for Driver
@@ -564,6 +586,8 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
             <div className="space-y-2.5">
               {users.map((u) => {
                 const isSelf = String(u._id) === String(currentUser.id);
+                const isRestricted = u.canPostListings === false;
+
                 return (
                   <div key={u._id} className="p-3.5 rounded-lg border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                     <div>
@@ -572,6 +596,11 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
                         <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${u.role === "admin" ? "bg-emerald-100 text-emerald-800 border border-emerald-300" : u.role === "viewer" ? "bg-amber-100 text-amber-800 border border-amber-300" : u.role === "driver" ? "bg-blue-100 text-blue-800 border border-blue-300" : "bg-slate-100 text-slate-700 border border-slate-300"}`}>
                           {u.role === "user" ? `buyer/seller (${u.accountType || "personal"})` : u.role}
                         </span>
+                        {isRestricted && (
+                          <span className="bg-red-100 text-red-800 border border-red-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                            🚫 Post Restricted
+                          </span>
+                        )}
                         {u.ratingCount > 0 && (
                           <span className="bg-yellow-50 text-yellow-800 border border-yellow-300 text-[11px] font-bold px-2 py-0.5 rounded-full">
                             ⭐ {u.averageRating} ({u.ratingCount})
@@ -583,6 +612,14 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
 
                     {isFullAdmin && (
                       <div className="flex items-center gap-2">
+                        {u.role === "user" && (
+                          <button 
+                            onClick={() => handleTogglePosting(u)} 
+                            className={`text-xs font-bold px-3 py-1.5 rounded-lg border ${!isRestricted ? "bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200" : "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200"}`}
+                          >
+                            {!isRestricted ? "🚫 Restrict Posting" : "✅ Allow Posting"}
+                          </button>
+                        )}
                         <button onClick={() => { setResetTargetUser(u); setResetPassword(""); setResetConfirmPassword(""); }} className="text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg">
                           🔑 Reset Password
                         </button>
