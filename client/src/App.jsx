@@ -70,8 +70,8 @@ export default function App() {
   const [replyText, setReplyText] = useState("");
 
   const [editingListing, setEditingListing] = useState(null);
-  // NEW: Add isOversized to Edit Form State
-  const [editFormData, setEditFormData] = useState({ title: "", description: "", price: "", stockCount: 1, isLocationMasked: true, isOversized: false });
+  // NEW: Add condition to Edit Form State
+  const [editFormData, setEditFormData] = useState({ title: "", description: "", price: "", stockCount: 1, isLocationMasked: true, isOversized: false, condition: "New" });
 
   const loadMarketplaceData = async () => {
     try {
@@ -198,10 +198,10 @@ export default function App() {
     setCheckoutError("");
   }, [activeTab]);
 
+  // NEW: Updated price formatter to remove "hourly"
   const formatPrice = (item) => {
     if (!item) return "$0 GYD";
     if (item.pricingType === "free") return "FREE";
-    if (item.pricingType === "hourly") return `$${Number(item.price || 0).toLocaleString()} GYD/hr`;
     return `$${Number(item.price || 0).toLocaleString()} GYD`;
   };
 
@@ -582,7 +582,7 @@ export default function App() {
             body: JSON.stringify({
               origin: item.location,
               destination: currentUser.location,
-              isOversized: item.isOversized || false // Pass to backend for consistency
+              isOversized: item.isOversized || false 
             })
           });
           
@@ -989,7 +989,12 @@ export default function App() {
                             {stock === 1 && (
                               <span className="absolute top-2 left-2 bg-red-600 text-white text-[11px] font-black px-2.5 py-1 rounded-full shadow-md animate-pulse">🔥 Only 1 Available!</span>
                             )}
-                            <span className="absolute bottom-2 left-2 bg-slate-900/80 text-white text-[11px] px-2 py-0.5 rounded">{item.category} › {item.subcategory}</span>
+                            
+                            {/* NEW: Condition displayed right beside the category */}
+                            <span className="absolute bottom-2 left-2 bg-slate-900/80 text-white text-[11px] px-2 py-0.5 rounded shadow-sm flex items-center gap-1.5">
+                              <span>{item.category} › {item.subcategory}</span>
+                              <span className="border-l border-white/40 pl-1.5 text-emerald-300 font-bold">{item.condition || "New"}</span>
+                            </span>
                           </div>
                           <div className="p-4 flex-1 flex flex-col justify-between">
                             <div>
@@ -999,7 +1004,6 @@ export default function App() {
                               </div>
                               <h3 className="font-bold text-sm text-slate-900 line-clamp-2 mt-0.5 group-hover:text-emerald-700">
                                 {item.title}
-                                {/* NEW: Oversized Search Feed Badge */}
                                 {item.isOversized && (
                                   <span className="ml-2 bg-amber-100 text-amber-800 border border-amber-200 text-[9px] font-black px-1.5 py-0.5 rounded uppercase align-middle shadow-sm">
                                     📦 Oversize
@@ -1363,7 +1367,8 @@ export default function App() {
                                 price: item.price,
                                 stockCount: item.stockCount,
                                 isLocationMasked: item.isLocationMasked !== false,
-                                isOversized: item.isOversized || false // Load Oversize flag
+                                isOversized: item.isOversized || false,
+                                condition: item.condition || "New" // Load Condition flag
                               });
                             }}
                             className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold px-3 py-1.5 rounded-lg"
@@ -1403,7 +1408,7 @@ export default function App() {
         </>
       )}
 
-      {/* NEW: Edit Modal Form Layout Updates */}
+      {/* NEW: Edit Modal Form Updates */}
       {editingListing && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200">
           <div className="bg-white max-w-md w-full rounded-xl p-6 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
@@ -1443,6 +1448,18 @@ export default function App() {
                     onChange={e => setEditFormData({...editFormData, price: e.target.value})} 
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" 
                   />
+                </div>
+                <div>
+                   <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Condition</label>
+                   <select 
+                     value={editFormData.condition} 
+                     onChange={e => setEditFormData({...editFormData, condition: e.target.value})} 
+                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                   >
+                     <option value="New">New</option>
+                     <option value="Used - Good">Used - Good</option>
+                     <option value="Used - Fair">Used - Fair</option>
+                   </select>
                 </div>
                 <div>
                   <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Stock Available</label>
