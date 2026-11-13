@@ -14,6 +14,7 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
     stockCount: 1,
     location: currentUser?.location || "Toronto, ON",
     isLocationMasked: true,
+    isOversized: false, // NEW
     description: ""
   });
   
@@ -41,7 +42,7 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
       });
     })).then(base64Images => {
       setImages(prev => [...prev, ...base64Images].slice(0, 5));
-      if (base64Images.length > 0) setError(""); // clear error if they finally uploaded
+      if (base64Images.length > 0) setError(""); 
     }).catch(err => {
       setError("Failed to read image file.");
     });
@@ -56,7 +57,6 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
     setIsSubmitting(true);
     setError("");
 
-    // UPDATE: Enforce minimum of 1 picture
     if (!images || images.length === 0) {
       setError("At least 1 picture is required to post a listing.");
       setIsSubmitting(false);
@@ -75,6 +75,7 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
         stockCount: Math.max(1, Number(formData.stockCount || 1)),
         location: formData.location.trim(),
         isLocationMasked: formData.isLocationMasked,
+        isOversized: formData.isOversized, // Add to payload
         description: formData.description.trim(),
         images: images 
       };
@@ -204,6 +205,26 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
               className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
             />
             <span className="text-sm font-bold text-slate-700">Mask my exact address from public view</span>
+          </label>
+        </div>
+
+        {/* NEW: Oversized Item Form Section */}
+        <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl space-y-3 mt-2">
+          <p className="text-xs text-amber-900 font-semibold leading-relaxed">
+            <span className="font-black">DELIVERY OVERSIZE CHARGE:</span> Items that can not fit in 15 inch x 10 inch x 10 inch container will be charged an extra delivery cost. Delivery cost is $20/km for first container (buyer pays) + $10/km for all additional containers (seller pays) required to ship your product.
+          </p>
+          <label className="flex items-start gap-3 cursor-pointer bg-white border border-amber-300 p-3 rounded-lg w-full transition-colors hover:bg-amber-50/50">
+            <input 
+              type="checkbox" 
+              checked={formData.isOversized} 
+              onChange={e => setFormData({...formData, isOversized: e.target.checked})}
+              className="w-5 h-5 mt-0.5 text-amber-600 focus:ring-amber-500 rounded border-slate-300"
+            />
+            <div className="flex-1">
+              <span className="text-sm font-bold text-slate-900">Oversized item</span>
+              <p className="text-xs text-slate-600 mt-0.5 font-medium">ANY Product larger than 15 inch x 10 inch x 10 inch container</p>
+              <p className="text-[10px] text-amber-700 mt-1 font-bold">To avoid seller paying over sized item cost click on this box to have the buyer pay for the additional delivery cost.</p>
+            </div>
           </label>
         </div>
 
