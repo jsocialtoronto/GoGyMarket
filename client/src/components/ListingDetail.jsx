@@ -84,7 +84,7 @@ export default function ListingDetail({
         body: JSON.stringify({
           origin: `${listing.location}, Canada`,
           destination: buyerLocationType === "pin" ? destination : `${destination}, Canada`,
-          isOversized: listing.isOversized || false // Pass oversized flag to backend
+          isOversized: listing.isOversized || false 
         })
       });
       const data = await res.json();
@@ -127,6 +127,7 @@ export default function ListingDetail({
       specialInstructions: deliveryMethod === "delivery" ? specialInstructions : "",
       shippingCost: deliveryMethod === "delivery" ? Number(shippingCost || 0) : 0,
       isOversized: listing.isOversized || false,
+      condition: listing.condition || "New",
       totalCost
     };
     onAddToCart(cartItem);
@@ -199,13 +200,17 @@ export default function ListingDetail({
                   </span>
                 </div>
 
+                {/* NEW: Condition Badge */}
+                <div className="inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-800 px-3 py-1.5 rounded-lg text-xs font-bold border border-indigo-200">
+                  <span>🏷️</span> <span>{listing.condition || "New"}</span>
+                </div>
+
                 {listing.sellerRatingCount > 0 && (
                   <div className="inline-flex items-center gap-1.5 bg-yellow-50 text-yellow-800 px-3 py-1.5 rounded-lg text-xs font-bold border border-yellow-300">
                     <span>⭐</span> <span>{listing.sellerRating} ({listing.sellerRatingCount} Reviews)</span>
                   </div>
                 )}
 
-                {/* NEW: Oversized Badge */}
                 {listing.isOversized && (
                   <div className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-900 px-3 py-1.5 rounded-lg text-xs font-black border border-amber-300 uppercase tracking-wide">
                     <span>📦</span> <span>Oversized Item</span>
@@ -301,7 +306,6 @@ export default function ListingDetail({
                       className="w-5 h-5 text-emerald-600 focus:ring-emerald-500"
                     />
                     <div className="flex-1">
-                      {/* NEW: Dynamic pricing text based on isOversized flag */}
                       <p className="font-bold text-slate-900 text-sm">Delivery ({listing.isOversized ? "$30" : "$20"} GYD / km)</p>
                       <p className="text-xs text-slate-500 font-medium">
                         Dispatch a driver to your location.
