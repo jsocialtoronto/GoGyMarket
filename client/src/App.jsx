@@ -70,7 +70,8 @@ export default function App() {
   const [replyText, setReplyText] = useState("");
 
   const [editingListing, setEditingListing] = useState(null);
-  const [editFormData, setEditFormData] = useState({ title: "", description: "", price: "", stockCount: 1, isLocationMasked: true });
+  // NEW: Add isOversized to Edit Form State
+  const [editFormData, setEditFormData] = useState({ title: "", description: "", price: "", stockCount: 1, isLocationMasked: true, isOversized: false });
 
   const loadMarketplaceData = async () => {
     try {
@@ -580,7 +581,8 @@ export default function App() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               origin: item.location,
-              destination: currentUser.location 
+              destination: currentUser.location,
+              isOversized: item.isOversized || false // Pass to backend for consistency
             })
           });
           
@@ -995,7 +997,15 @@ export default function App() {
                                 <p className="text-emerald-700 font-extrabold text-lg">{formatPrice(item)}</p>
                                 {stock > 1 && <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">{stock} in stock</span>}
                               </div>
-                              <h3 className="font-bold text-sm text-slate-900 line-clamp-2 mt-0.5 group-hover:text-emerald-700">{item.title}</h3>
+                              <h3 className="font-bold text-sm text-slate-900 line-clamp-2 mt-0.5 group-hover:text-emerald-700">
+                                {item.title}
+                                {/* NEW: Oversized Search Feed Badge */}
+                                {item.isOversized && (
+                                  <span className="ml-2 bg-amber-100 text-amber-800 border border-amber-200 text-[9px] font-black px-1.5 py-0.5 rounded uppercase align-middle shadow-sm">
+                                    📦 Oversize
+                                  </span>
+                                )}
+                              </h3>
                             </div>
                             <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
                               <span className="truncate max-w-[120px] font-semibold text-emerald-700">📍 {distText}</span>
@@ -1352,7 +1362,8 @@ export default function App() {
                                 description: item.description,
                                 price: item.price,
                                 stockCount: item.stockCount,
-                                isLocationMasked: item.isLocationMasked !== false
+                                isLocationMasked: item.isLocationMasked !== false,
+                                isOversized: item.isOversized || false // Load Oversize flag
                               });
                             }}
                             className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold px-3 py-1.5 rounded-lg"
@@ -1392,9 +1403,10 @@ export default function App() {
         </>
       )}
 
+      {/* NEW: Edit Modal Form Layout Updates */}
       {editingListing && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200">
-          <div className="bg-white max-w-md w-full rounded-xl p-6 shadow-xl space-y-4">
+          <div className="bg-white max-w-md w-full rounded-xl p-6 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-200 pb-2">
               <h3 className="font-bold text-slate-900 text-lg">Edit Listing</h3>
               <button onClick={() => setEditingListing(null)} className="text-slate-400 hover:text-slate-700 font-bold">✕</button>
@@ -1444,6 +1456,24 @@ export default function App() {
                   />
                   <p className="text-[10px] text-slate-500 mt-1">Set to 0 to mark as Sold Out.</p>
                 </div>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl space-y-2 mt-2">
+                <p className="text-[11px] text-amber-900 font-semibold leading-tight">
+                  <span className="font-black">DELIVERY OVERSIZE CHARGE:</span> Items that can not fit in 15 inch x 10 inch x 10 inch container will be charged an extra delivery cost. Delivery cost is $20/km for first container (buyer pays) + $10/km for all additional containers (seller pays).
+                </p>
+                <label className="flex items-start gap-2 cursor-pointer bg-white border border-amber-300 p-2 rounded-lg w-full transition-colors hover:bg-amber-50/50">
+                  <input 
+                    type="checkbox" 
+                    checked={editFormData.isOversized} 
+                    onChange={e => setEditFormData({...editFormData, isOversized: e.target.checked})}
+                    className="w-4 h-4 mt-0.5 text-amber-600 focus:ring-amber-500 rounded border-slate-300"
+                  />
+                  <div className="flex-1">
+                    <span className="text-xs font-bold text-slate-900">Oversized item</span>
+                    <p className="text-[10px] text-amber-700 mt-0.5 font-bold leading-tight">To avoid seller paying over sized item cost click on this box to have the buyer pay for the additional delivery cost.</p>
+                  </div>
+                </label>
               </div>
               
               <label className="flex items-center gap-2 cursor-pointer bg-slate-50 border border-slate-200 p-3 rounded-lg w-fit mt-2">
