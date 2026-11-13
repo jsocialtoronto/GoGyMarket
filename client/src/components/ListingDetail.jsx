@@ -30,6 +30,8 @@ export default function ListingDetail({
   const [shippingDistance, setShippingDistance] = useState(null);
   const [isCalculating, setIsCalculating] = useState(false);
   const [calcError, setCalcError] = useState("");
+  
+  const [checkoutFormError, setCheckoutFormError] = useState("");
 
   const availableStock = listing.stockCount != null ? Number(listing.stockCount) : 1;
   const qtyInCart = cart.filter(item => item._id === listing._id).reduce((sum, item) => sum + item.quantity, 0);
@@ -41,6 +43,7 @@ export default function ListingDetail({
     setDeliveryMethod("pickup");
     setShippingCost(null);
     setCalcError("");
+    setCheckoutFormError("");
   }, [listing._id]);
 
   useEffect(() => {
@@ -55,11 +58,9 @@ export default function ListingDetail({
 
   const isOwner = listing.sellerId === currentUser.id;
 
-  // Seller location display logic (Strictly controlled by the seller's settings)
   const isSellerMasked = listing.isLocationMasked !== false; 
   const displayLocation = (isSellerMasked && !isOwner) ? "Hidden for Privacy" : listing.location;
 
-  // Dynamic back button text
   let backText = "Back to Search";
   if (activeTab === "listings") backText = "Back to My Listings";
   if (activeTab === "favourites") backText = "Back to Saved";
@@ -74,14 +75,16 @@ export default function ListingDetail({
 
     setIsCalculating(true);
     setCalcError("");
+    setCheckoutFormError(""); 
 
     try {
       const res = await fetch(`${API_BASE}/api/shipping-quote`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          origin: `${listing.location}, Canada`, // Always uses real backend location for math
-          destination: buyerLocationType === "pin" ? destination : `${destination}, Canada`
+          origin: `${listing.location}, Canada`,
+          destination: buyerLocationType === "pin" ? destination : `${destination}, Canada`,
+          isOversized: listing.isOversized || false // Pass oversized flag to backend
         })
       });
       const data = await res.json();
@@ -104,6 +107,13 @@ export default function ListingDetail({
     : itemSubtotal;
 
   const handleAddToCart = () => {
+    setCheckoutFormError("");
+    
+    if (deliveryMethod === "delivery" && shippingCost === null) {
+      setCheckoutFormError("Please click 'Calculate' above to confirm your delivery distance and fee before adding to cart.");
+      return;
+    }
+
     const cartItem = {
       ...listing,
       cartItemId: Date.now().toString(),
@@ -116,6 +126,7 @@ export default function ListingDetail({
       buyerPin: deliveryMethod === "delivery" && buyerLocationType === "pin" ? buyerPin : "",
       specialInstructions: deliveryMethod === "delivery" ? specialInstructions : "",
       shippingCost: deliveryMethod === "delivery" ? Number(shippingCost || 0) : 0,
+      isOversized: listing.isOversized || false,
       totalCost
     };
     onAddToCart(cartItem);
@@ -194,6 +205,13 @@ export default function ListingDetail({
                   </div>
                 )}
 
+                {/* NEW: Oversized Badge */}
+                {listing.isOversized && (
+                  <div className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-900 px-3 py-1.5 rounded-lg text-xs font-black border border-amber-300 uppercase tracking-wide">
+                    <span>📦</span> <span>Oversized Item</span>
+                  </div>
+                )}
+
                 <div
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold border ${
                     availableStock === 1
@@ -254,7 +272,10 @@ export default function ListingDetail({
                       type="radio"
                       name="buyerDelivery"
                       checked={deliveryMethod === "pickup"}
-                      onChange={() => setDeliveryMethod("pickup")}
+                      onChange={() => {
+                        setDeliveryMethod("pickup");
+                        setCheckoutFormError("");
+                      }}
                       className="w-5 h-5 text-emerald-600 focus:ring-emerald-500"
                     />
                     <div>
@@ -280,7 +301,8 @@ export default function ListingDetail({
                       className="w-5 h-5 text-emerald-600 focus:ring-emerald-500"
                     />
                     <div className="flex-1">
-                      <p className="font-bold text-slate-900 text-sm">Delivery ($20 GYD / km)</p>
+                      {/* NEW: Dynamic pricing text based on isOversized flag */}
+                      <p className="font-bold text-slate-900 text-sm">Delivery ({listing.isOversized ? "$30" : "$20"} GYD / km)</p>
                       <p className="text-xs text-slate-500 font-medium">
                         Dispatch a driver to your location.
                       </p>
@@ -298,7 +320,7 @@ export default function ListingDetail({
                             type="radio" 
                             name="locationTypeToggle"
                             checked={buyerLocationType === 'address'} 
-                            onChange={() => { setBuyerLocationType('address'); setShippingCost(null); }}
+                            onChange={() => { setBuyerLocationType('address'); setShippingCost(null); setCheckoutFormError(""); }}
                             className="text-emerald-600"
                           /> Street Address
                         </label>
@@ -308,7 +330,7 @@ export default function ListingDetail({
                               type="radio" 
                               name="locationTypeToggle"
                               checked={buyerLocationType === 'pin'} 
-                              onChange={() => { setBuyerLocationType('pin'); setShippingCost(null); }}
+                              onChange={() => { setBuyerLocationType('pin'); setShippingCost(null); setCheckoutFormError(""); }}
                               className="text-emerald-600"
                             /> Pin Drop URL
                           </label>
@@ -323,7 +345,6 @@ export default function ListingDetail({
                       </div>
 
                       <div className="flex flex-col sm:flex-row gap-2">
-                        {/* UPDATE: Removed buyer address masking so they can see what they type */}
                         <div className="relative flex-1">
                           <input
                             type="text"
@@ -333,6 +354,7 @@ export default function ListingDetail({
                               if (buyerLocationType === 'address') setBuyerAddress(e.target.value); 
                               else setBuyerPin(e.target.value); 
                               setShippingCost(null); 
+                              setCheckoutFormError("");
                             }}
                             className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
                           />
@@ -405,14 +427,18 @@ export default function ListingDetail({
               </div>
             ) : (
               <div className="flex flex-col gap-3">
+                
+                {checkoutFormError && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 text-sm font-bold px-4 py-3 rounded-lg text-center animate-in fade-in zoom-in-95 duration-200">
+                    ⚠️ {checkoutFormError}
+                  </div>
+                )}
+
                 <button
                   onClick={handleAddToCart}
-                  disabled={deliveryMethod === "delivery" && shippingCost === null}
-                  className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-400 text-white font-bold text-lg py-3.5 rounded-lg shadow-md transition-all flex items-center justify-center gap-2"
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-lg py-3.5 rounded-lg shadow-md transition-all flex items-center justify-center gap-2"
                 >
-                  {deliveryMethod === "delivery" && shippingCost === null
-                    ? "Calculate delivery to add to cart"
-                    : "🛒 Add to Cart"}
+                  🛒 Add to Cart
                 </button>
 
                 <button
