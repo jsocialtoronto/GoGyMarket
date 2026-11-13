@@ -44,7 +44,9 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true },
     location: { type: String, required: true, default: "Toronto, ON" },
     averageRating: { type: Number, default: 0 },
-    ratingCount: { type: Number, default: 0 }
+    ratingCount: { type: Number, default: 0 },
+    // NEW: Permission toggle for posting listings
+    canPostListings: { type: Boolean, default: true }
   },
   { timestamps: true }
 );
@@ -298,7 +300,8 @@ app.post("/api/auth/register", async (req, res) => {
       email,
       phone,
       password: hashedPassword,
-      location: location || "Toronto, ON"
+      location: location || "Toronto, ON",
+      canPostListings: true
     });
 
     const token = jwt.sign({ id: newUser._id, role: newUser.role }, JWT_SECRET, { expiresIn: "7d" });
@@ -306,7 +309,7 @@ app.post("/api/auth/register", async (req, res) => {
     res.status(201).json({
       token,
       user: {
-        id: newUser._id, name: newUser.name, email: newUser.email, phone: newUser.phone, location: newUser.location, role: newUser.role
+        id: newUser._id, name: newUser.name, email: newUser.email, phone: newUser.phone, location: newUser.location, role: newUser.role, canPostListings: newUser.canPostListings
       }
     });
   } catch (err) {
@@ -330,7 +333,7 @@ app.post("/api/auth/login", async (req, res) => {
     res.json({
       token,
       user: {
-        id: user._id, name: user.name, email: user.email, phone: user.phone, location: user.location, role: user.role || "user"
+        id: user._id, name: user.name, email: user.email, phone: user.phone, location: user.location, role: user.role || "user", canPostListings: user.canPostListings !== false
       }
     });
   } catch (err) {
@@ -750,6 +753,26 @@ app.patch("/api/admin/users/:id/reset-password", verifyStaff, requireFullAdmin, 
   }
 });
 
+// NEW: Toggle Posting Privileges (Admin Only)
+app.patch("/api/admin/users/:id/toggle-posting", verifyStaff, requireFullAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ error: "User not found." });
+    
+    // Default undefined to true, then flip it
+    const currentStatus = user.canPostListings !== false;
+    user.canPostListings = !currentStatus;
+    
+    await user.save();
+    res.json({ 
+      message: `User posting access set to ${user.canPostListings}.`, 
+      canPostListings: user.canPostListings 
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ==========================================
 // 6. DRIVER API ROUTES
 // ==========================================
@@ -860,14 +883,20 @@ app.get("/api/listings", async (req, res) => {
 
 app.post("/api/listings", async (req, res) => {
   try {
-    const stock = req.body.stockCount != null ? Number(req.body.stockCount) : 1;
+    // SECURITY BLOCK: Check if the user is allowed to post
     const seller = await User.findById(req.body.sellerId);
+    if (!seller) return res.status(404).json({ error: "Seller account not found." });
+    if (seller.canPostListings === false) {
+      return res.status(403).json({ error: "Your account has been restricted from posting new listings." });
+    }
+
+    const stock = req.body.stockCount != null ? Number(req.body.stockCount) : 1;
     const newListing = await Listing.create({
       ...req.body,
       stockCount: stock,
       status: stock > 0 ? "active" : "sold",
-      sellerRating: seller ? seller.averageRating : 0,
-      sellerRatingCount: seller ? seller.ratingCount : 0,
+      sellerRating: seller.averageRating || 0,
+      sellerRatingCount: seller.ratingCount || 0,
       isLocationMasked: req.body.isLocationMasked !== undefined ? req.body.isLocationMasked : true
     });
     res.status(201).json(newListing);
@@ -1002,7 +1031,6 @@ app.delete("/api/conversations/:id", async (req, res) => {
   }
 });
 
-// UPDATE: More aggressive unwrapping for Google short links and /place/ URL parsing
 async function formatWaypoint(inputStr) {
   if (!inputStr || typeof inputStr !== "string") return { address: "Toronto, ON" };
 
@@ -1014,7 +1042,7 @@ async function formatWaypoint(inputStr) {
         method: "GET", 
         redirect: "follow",
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" // Prevents basic bot blocks
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" 
         }
       });
       urlToTest = response.url;
@@ -1023,7 +1051,6 @@ async function formatWaypoint(inputStr) {
     }
   }
 
-  // 1. Try to extract exact Map Coordinates
   const pinMatch = urlToTest.match(/3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
   if (pinMatch) return { location: { latLng: { latitude: parseFloat(pinMatch[1]), longitude: parseFloat(pinMatch[2]) } } };
   
@@ -1036,7 +1063,6 @@ async function formatWaypoint(inputStr) {
   const rawMatch = urlToTest.match(/^(-?\d+\.\d+),\s*(-?\d+\.\d+)$/);
   if (rawMatch) return { location: { latLng: { latitude: parseFloat(rawMatch[1]), longitude: parseFloat(rawMatch[2]) } } };
 
-  // 2. Try to extract the literal address string from an expanded /place/ URL
   const placeMatch = urlToTest.match(/\/place\/([^\/]+)/);
   if (placeMatch) {
     let decoded = decodeURIComponent(placeMatch[1]).replace(/\+/g, " ");
@@ -1044,7 +1070,6 @@ async function formatWaypoint(inputStr) {
     return { address: decoded };
   }
 
-  // If none match, assume they just typed in an address natively
   return { address: inputStr };
 }
 
