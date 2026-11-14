@@ -24,6 +24,9 @@ export default function App() {
   const [selectedListing, setSelectedListing] = useState(null);
   const [listings, setListings] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // NEW: Driver Sub-tab management
+  const [driverTab, setDriverTab] = useState("active"); // "active", "my", "cancelled"
 
   const [itemDistances, setItemDistances] = useState({});
 
@@ -70,7 +73,6 @@ export default function App() {
   const [replyText, setReplyText] = useState("");
 
   const [editingListing, setEditingListing] = useState(null);
-  // NEW: Add condition to Edit Form State
   const [editFormData, setEditFormData] = useState({ title: "", description: "", price: "", stockCount: 1, isLocationMasked: true, isOversized: false, condition: "New" });
 
   const loadMarketplaceData = async () => {
@@ -198,7 +200,6 @@ export default function App() {
     setCheckoutError("");
   }, [activeTab]);
 
-  // NEW: Updated price formatter to remove "hourly"
   const formatPrice = (item) => {
     if (!item) return "$0 GYD";
     if (item.pricingType === "free") return "FREE";
@@ -614,71 +615,91 @@ export default function App() {
 
   const myListings = (listings || []).filter((item) => item?.sellerId === currentUser?.id);
   const favouriteListings = (listings || []).filter((item) => favouriteIds.includes(item?._id));
-  const activeConversation = conversations?.find((c) => c?._id === activeConvId);
+  
+  // CRASH-PROOFED Active Conversation Lookup
+  const activeConversation = Array.isArray(conversations) ? conversations.find((c) => c?._id === activeConvId) : null;
 
-  const renderMessagesTab = () => (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden grid grid-cols-1 md:grid-cols-3 min-h-[480px]">
-      <div className="border-r border-slate-200 p-4 space-y-2 overflow-y-auto max-h-[480px]">
-        <h2 className="font-bold text-sm uppercase tracking-wider text-slate-500 mb-3">Conversations</h2>
-        {(!conversations || conversations.length === 0) ? (
-          <p className="text-xs text-slate-400">No messages yet.</p>
-        ) : (
-          conversations.map((conv) => {
-            if (!conv) return null;
-            const otherPersonName = conv?.sellerName === currentUser?.name ? conv?.buyerName : conv?.sellerName;
-            return (
-              <div key={conv._id} onClick={() => setActiveConvId(conv._id)} className={`p-3 rounded-lg cursor-pointer border transition-colors ${activeConvId === conv._id ? "bg-emerald-50 border-emerald-300" : "border-slate-200 hover:bg-slate-50"}`}>
-                <div className="flex justify-between items-start text-xs font-bold text-slate-800">
-                  <div className="flex-1">
-                    <span>{otherPersonName || "Unknown User"}</span>
-                    {conv?.isDeliveryChat && <span className="ml-2 text-[9px] bg-blue-100 text-blue-800 border border-blue-200 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Dispatch</span>}
-                    <p className="text-xs text-slate-600 font-medium truncate mt-0.5">{conv?.listingTitle || "Item Inquiry"}</p>
-                  </div>
-                  <button onClick={(e) => handleDeleteConversation(e, conv._id)} className="ml-2 text-slate-300 hover:text-red-500 transition-colors" title="Delete Thread">🗑️</button>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
+  // CRASH-PROOFED Messages Renderer
+  const renderMessagesTab = () => {
+    try {
+      const convArray = Array.isArray(conversations) ? conversations : [];
       
-      <div className="md:col-span-2 flex flex-col justify-between p-4 bg-slate-50">
-        {activeConversation ? (
-          <>
-            <div className="space-y-4 overflow-y-auto max-h-80 pr-2">
-              {(activeConversation?.messages || []).map((m, idx) => {
-                if (!m) return null;
-                const isMe = m?.sender === currentUser?.name;
-                const isAdminMsg = m?.sender === "GoGyMarket Admin" || m?.sender === "GoGyMarket Dispatch";
+      return (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden grid grid-cols-1 md:grid-cols-3 min-h-[480px]">
+          <div className="border-r border-slate-200 p-4 space-y-2 overflow-y-auto max-h-[480px]">
+            <h2 className="font-bold text-sm uppercase tracking-wider text-slate-500 mb-3">Conversations</h2>
+            {convArray.length === 0 ? (
+              <p className="text-xs text-slate-400">No messages yet.</p>
+            ) : (
+              convArray.map((conv) => {
+                if (!conv || !conv._id) return null;
+                const otherPersonName = conv.sellerName === currentUser?.name ? conv.buyerName : conv.sellerName;
                 return (
-                  <div key={m?._id || idx} className={`flex flex-col ${isAdminMsg ? "items-center" : isMe ? "items-end" : "items-start"}`}>
-                    <div className="flex items-center gap-2">
-                      {isMe && !isAdminMsg && m?._id && (
-                        <button onClick={() => handleDeleteMessage(activeConversation._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
-                      )}
-                      <div className={`px-4 py-2.5 rounded-xl text-sm max-w-md whitespace-pre-wrap ${isAdminMsg ? "bg-amber-50 border border-amber-300 text-amber-950 font-medium" : isMe ? "bg-emerald-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
-                        {m?.text}
+                  <div key={conv._id} onClick={() => setActiveConvId(conv._id)} className={`p-3 rounded-lg cursor-pointer border transition-colors ${activeConvId === conv._id ? "bg-emerald-50 border-emerald-300" : "border-slate-200 hover:bg-slate-50"}`}>
+                    <div className="flex justify-between items-start text-xs font-bold text-slate-800">
+                      <div className="flex-1">
+                        <span>{otherPersonName || "Unknown User"}</span>
+                        {conv.isDeliveryChat && <span className="ml-2 text-[9px] bg-blue-100 text-blue-800 border border-blue-200 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Dispatch</span>}
+                        <p className="text-xs text-slate-600 font-medium truncate mt-0.5">{conv.listingTitle || "Item Inquiry"}</p>
                       </div>
-                      {!isMe && !isAdminMsg && m?._id && (
-                        <button onClick={() => handleDeleteMessage(activeConversation._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
-                      )}
+                      <button onClick={(e) => handleDeleteConversation(e, conv._id)} className="ml-2 text-slate-300 hover:text-red-500 transition-colors" title="Delete Thread">🗑️</button>
                     </div>
-                    <span className="text-[10px] text-slate-400 mt-1 px-1">{m?.sender} • {m?.time}</span>
                   </div>
                 );
-              })}
-            </div>
-            <form onSubmit={handleSendReply} className="mt-4 flex gap-2">
-              <input type="text" placeholder="Write a message..." value={replyText} onChange={(e) => setReplyText(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-emerald-500" />
-              <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors">Send</button>
-            </form>
-          </>
-        ) : (
-          <div className="m-auto text-center text-slate-400 text-sm">Select a conversation on the left to view messages.</div>
-        )}
-      </div>
-    </div>
-  );
+              })
+            )}
+          </div>
+          
+          <div className="md:col-span-2 flex flex-col justify-between p-4 bg-slate-50">
+            {activeConversation ? (
+              <>
+                <div className="space-y-4 overflow-y-auto max-h-80 pr-2">
+                  {(Array.isArray(activeConversation.messages) ? activeConversation.messages : []).map((m, idx) => {
+                    if (!m) return null;
+                    const msgId = m._id || `msg-${idx}`;
+                    const isMe = m.sender === currentUser?.name;
+                    const isAdminMsg = m.sender === "GoGyMarket Admin" || m.sender === "GoGyMarket Dispatch";
+                    return (
+                      <div key={msgId} className={`flex flex-col ${isAdminMsg ? "items-center" : isMe ? "items-end" : "items-start"}`}>
+                        <div className="flex items-center gap-2">
+                          {isMe && !isAdminMsg && m._id && (
+                            <button onClick={() => handleDeleteMessage(activeConversation._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
+                          )}
+                          <div className={`px-4 py-2.5 rounded-xl text-sm max-w-md whitespace-pre-wrap ${isAdminMsg ? "bg-amber-50 border border-amber-300 text-amber-950 font-medium" : isMe ? "bg-emerald-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
+                            {m.text || ""}
+                          </div>
+                          {!isMe && !isAdminMsg && m._id && (
+                            <button onClick={() => handleDeleteMessage(activeConversation._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-slate-400 mt-1 px-1">{m.sender || "Unknown"} • {m.time || ""}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <form onSubmit={handleSendReply} className="mt-4 flex gap-2">
+                  <input type="text" placeholder="Write a message..." value={replyText} onChange={(e) => setReplyText(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-emerald-500" />
+                  <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors">Send</button>
+                </form>
+              </>
+            ) : (
+              <div className="m-auto text-center text-slate-400 text-sm">Select a conversation on the left to view messages.</div>
+            )}
+          </div>
+        </div>
+      );
+    } catch (err) {
+      return (
+        <div className="bg-white rounded-xl border border-red-200 p-8 text-center min-h-[480px] flex items-center justify-center">
+          <div className="space-y-3">
+            <h3 className="text-red-600 font-bold">Failed to render messages screen.</h3>
+            <p className="text-slate-500 text-xs">{err.message}</p>
+            <button onClick={loadMarketplaceData} className="bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-lg">Retry Loading Data</button>
+          </div>
+        </div>
+      );
+    }
+  };
 
   if (!currentUser) {
     return (
@@ -705,7 +726,7 @@ export default function App() {
       setActiveTab={setActiveTab}
       currentUser={currentUser}
       counts={{
-        unreadMessages: conversations?.length || 0,
+        unreadMessages: Array.isArray(conversations) ? conversations.length : 0,
         myListings: myListings?.length || 0,
         favourites: favouriteListings?.length || 0,
         cart: cart.reduce((sum, i) => sum + Number(i?.quantity || 1), 0),
@@ -716,91 +737,138 @@ export default function App() {
         <>
           {activeTab === "driver" && (
             <div className="max-w-4xl mx-auto space-y-6">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900">Driver Delivery Portal</h2>
-                  <p className="text-xs text-slate-500">View and accept pending delivery requests.</p>
+                  <p className="text-xs text-slate-500">Manage your delivery requests.</p>
                 </div>
                 <button onClick={loadDriverData} className="text-xs font-bold text-emerald-700 hover:underline">
                   ↻ Refresh Requests
                 </button>
               </div>
+
+              {/* NEW: Driver UI Tab Navigation */}
+              <div className="flex flex-wrap gap-2 bg-slate-100 p-1.5 rounded-lg w-fit">
+                <button 
+                  onClick={() => setDriverTab("active")} 
+                  className={`px-4 py-2 rounded-md text-xs font-bold transition-colors ${driverTab === "active" ? "bg-white shadow text-slate-900" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50"}`}
+                >
+                  All Active Requests
+                </button>
+                <button 
+                  onClick={() => setDriverTab("my")} 
+                  className={`px-4 py-2 rounded-md text-xs font-bold transition-colors ${driverTab === "my" ? "bg-white shadow text-slate-900" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50"}`}
+                >
+                  My Requests
+                </button>
+                <button 
+                  onClick={() => setDriverTab("cancelled")} 
+                  className={`px-4 py-2 rounded-md text-xs font-bold transition-colors ${driverTab === "cancelled" ? "bg-white shadow text-slate-900" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50"}`}
+                >
+                  Cancelled Requests
+                </button>
+              </div>
               
-              {(!driverOrders || driverOrders.length === 0) ? (
-                <div className="bg-white p-12 rounded-xl border border-slate-200 text-center text-slate-500">
-                  No active or pending delivery requests at the moment.
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {driverOrders.map((order) => (
-                    <div key={order._id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                      <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-                        <div>
-                          <span className="font-black text-slate-900">{order.orderNumber}</span>
-                          <span className={`ml-3 text-[11px] font-bold px-2.5 py-1 rounded-full ${
-                            order.dispatchStatus === 'pending' ? 'bg-amber-100 text-amber-800' : 
-                            order.dispatchStatus === 'active' ? 'bg-blue-100 text-blue-800' :
-                            'bg-emerald-100 text-emerald-800'
-                          }`}>
-                            {order.dispatchStatus === 'pending' ? '⏳ Pending Dispatch' : 
-                             order.dispatchStatus === 'active' ? '🚚 Active (In Transit)' :
-                             '✅ Completed'}
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-500">Placed: {new Date(order.createdAt).toLocaleString()}</p>
-                      </div>
-                      
-                      {(order.items || []).filter(i => i.deliveryMethod === 'delivery').map((item, idx) => (
-                        <div key={idx} className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
-                          <p className="font-bold text-slate-900 text-sm">{item.quantity}x {item.title}</p>
-                          
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                            <div className="bg-white p-3 rounded border border-slate-200">
-                              <p className="font-bold text-slate-500 uppercase mb-1">Pickup From (Seller)</p>
-                              <p className="font-semibold text-slate-800">{item.sellerName}</p>
-                              <p className="text-slate-600">{item.sellerLocation}</p>
-                            </div>
-                            
-                            <div className="bg-white p-3 rounded border border-slate-200">
-                              <p className="font-bold text-slate-500 uppercase mb-1">Deliver To (Buyer)</p>
-                              <p className="font-semibold text-slate-800">{order.buyerName} ({order.buyerContact})</p>
-                              {item.buyerLocationType === 'pin' ? (
-                                <a href={item.buyerPin} target="_blank" rel="noreferrer" className="text-blue-600 underline font-semibold break-all">📍 View Pin Drop Location</a>
-                              ) : (
-                                <p className="text-slate-600">{item.buyerAddress}</p>
-                              )}
-                            </div>
-                          </div>
+              {/* NEW: Filter driver tab content block */}
+              {(() => {
+                const safeDriverOrders = Array.isArray(driverOrders) ? driverOrders : [];
+                const filteredForTab = safeDriverOrders.filter(order => {
+                  if (driverTab === "active") {
+                    return order.dispatchStatus === "pending" && order.status === "active";
+                  }
+                  if (driverTab === "my") {
+                    return String(order.driverId) === String(currentUser.id) && 
+                           (order.dispatchStatus === "active" || order.dispatchStatus === "completed") && 
+                           order.status === "active";
+                  }
+                  if (driverTab === "cancelled") {
+                    return String(order.driverId) === String(currentUser.id) && order.status === "cancelled";
+                  }
+                  return false;
+                });
 
-                          {item.specialInstructions && (
-                            <div className="mt-2 bg-amber-50 p-3 rounded-lg border border-amber-200 text-xs">
-                              <span className="font-bold text-amber-800">Special Instructions: </span>
-                              <span className="text-amber-900">{item.specialInstructions}</span>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-
-                      {order.dispatchStatus === 'pending' && (
-                        <button 
-                          onClick={() => handleAcceptDelivery(order._id)}
-                          className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-lg shadow-md transition-colors mt-2"
-                        >
-                          Accept Delivery Request
-                        </button>
-                      )}
-                      {order.dispatchStatus === 'active' && (
-                        <button 
-                          onClick={() => handleCompleteDelivery(order._id)}
-                          className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-md transition-colors mt-2"
-                        >
-                          ✓ Mark Delivery as Completed
-                        </button>
-                      )}
+                if (filteredForTab.length === 0) {
+                  return (
+                    <div className="bg-white p-12 rounded-xl border border-slate-200 text-center text-slate-500 text-sm font-medium">
+                      No delivery requests found for this category.
                     </div>
-                  ))}
-                </div>
-              )}
+                  );
+                }
+
+                return (
+                  <div className="space-y-4">
+                    {filteredForTab.map((order) => (
+                      <div key={order._id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                        <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                          <div>
+                            <span className="font-black text-slate-900">{order.orderNumber}</span>
+                            <span className={`ml-3 text-[11px] font-bold px-2.5 py-1 rounded-full ${
+                              order.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                              order.dispatchStatus === 'pending' ? 'bg-amber-100 text-amber-800' : 
+                              order.dispatchStatus === 'active' ? 'bg-blue-100 text-blue-800' :
+                              'bg-emerald-100 text-emerald-800'
+                            }`}>
+                              {order.status === 'cancelled' ? '❌ Cancelled by Admin' :
+                               order.dispatchStatus === 'pending' ? '⏳ Pending Dispatch' : 
+                               order.dispatchStatus === 'active' ? '🚚 Active (In Transit)' :
+                               '✅ Completed'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500">Placed: {new Date(order.createdAt).toLocaleString()}</p>
+                        </div>
+                        
+                        {(order.items || []).filter(i => i.deliveryMethod === 'delivery').map((item, idx) => (
+                          <div key={idx} className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
+                            <p className="font-bold text-slate-900 text-sm">{item.quantity}x {item.title}</p>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                              <div className="bg-white p-3 rounded border border-slate-200">
+                                <p className="font-bold text-slate-500 uppercase mb-1">Pickup From (Seller)</p>
+                                <p className="font-semibold text-slate-800">{item.sellerName}</p>
+                                <p className="text-slate-600">{item.sellerLocation}</p>
+                              </div>
+                              
+                              <div className="bg-white p-3 rounded border border-slate-200">
+                                <p className="font-bold text-slate-500 uppercase mb-1">Deliver To (Buyer)</p>
+                                <p className="font-semibold text-slate-800">{order.buyerName} ({order.buyerContact})</p>
+                                {item.buyerLocationType === 'pin' ? (
+                                  <a href={item.buyerPin} target="_blank" rel="noreferrer" className="text-blue-600 underline font-semibold break-all">📍 View Pin Drop Location</a>
+                                ) : (
+                                  <p className="text-slate-600">{item.buyerAddress}</p>
+                                )}
+                              </div>
+                            </div>
+
+                            {item.specialInstructions && (
+                              <div className="mt-2 bg-amber-50 p-3 rounded-lg border border-amber-200 text-xs">
+                                <span className="font-bold text-amber-800">Special Instructions: </span>
+                                <span className="text-amber-900">{item.specialInstructions}</span>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+
+                        {order.dispatchStatus === 'pending' && order.status === 'active' && (
+                          <button 
+                            onClick={() => handleAcceptDelivery(order._id)}
+                            className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-lg shadow-md transition-colors mt-2"
+                          >
+                            Accept Delivery Request
+                          </button>
+                        )}
+                        {order.dispatchStatus === 'active' && order.status === 'active' && (
+                          <button 
+                            onClick={() => handleCompleteDelivery(order._id)}
+                            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-md transition-colors mt-2"
+                          >
+                            ✓ Mark Delivery as Completed
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           )}
           {activeTab === "messages" && renderMessagesTab()}
@@ -990,7 +1058,6 @@ export default function App() {
                               <span className="absolute top-2 left-2 bg-red-600 text-white text-[11px] font-black px-2.5 py-1 rounded-full shadow-md animate-pulse">🔥 Only 1 Available!</span>
                             )}
                             
-                            {/* NEW: Condition displayed right beside the category */}
                             <span className="absolute bottom-2 left-2 bg-slate-900/80 text-white text-[11px] px-2 py-0.5 rounded shadow-sm flex items-center gap-1.5">
                               <span>{item.category} › {item.subcategory}</span>
                               <span className="border-l border-white/40 pl-1.5 text-emerald-300 font-bold">{item.condition || "New"}</span>
@@ -1300,6 +1367,9 @@ export default function App() {
             </div>
           )}
 
+          {/* User Messages Tab */}
+          {activeTab === "messages" && renderMessagesTab()}
+
           {activeTab === "post" && (
             <PostListingForm
               currentUser={currentUser}
@@ -1368,7 +1438,7 @@ export default function App() {
                                 stockCount: item.stockCount,
                                 isLocationMasked: item.isLocationMasked !== false,
                                 isOversized: item.isOversized || false,
-                                condition: item.condition || "New" // Load Condition flag
+                                condition: item.condition || "New"
                               });
                             }}
                             className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold px-3 py-1.5 rounded-lg"
@@ -1408,7 +1478,6 @@ export default function App() {
         </>
       )}
 
-      {/* NEW: Edit Modal Form Updates */}
       {editingListing && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200">
           <div className="bg-white max-w-md w-full rounded-xl p-6 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
