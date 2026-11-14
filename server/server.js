@@ -63,20 +63,17 @@ const listingSchema = new mongoose.Schema(
     subcategory: { type: String, required: true, index: true },
     pricingType: {
       type: String,
-      enum: ["fixed", "free"], // REMOVED HOURLY
+      enum: ["fixed", "free"],
       default: "fixed"
     },
     price: { type: Number, default: 0 },
     stockCount: { type: Number, required: true, default: 1, min: 0 },
-    
-    // NEW: Condition Field
     condition: { 
       type: String, 
       enum: ["New", "Used - Good", "Used - Fair"], 
       required: true,
       default: "New"
     },
-
     location: { type: String, required: true },
     isLocationMasked: { type: Boolean, default: true }, 
     isOversized: { type: Boolean, default: false }, 
@@ -791,9 +788,12 @@ app.get("/api/driver/orders", verifyStaff, async (req, res) => {
     if (req.staffUser.role !== "driver" && req.staffUser.role !== "admin") {
       return res.status(403).json({ error: "Driver or Admin access required." });
     }
+    
+    // STRICT DRIVER FILTER: Orders MUST be fully "active" (meaning paid/verified)
+    // or "cancelled" (so drivers know an order they accepted was voided).
     const orders = await Order.find({
       dispatchStatus: { $in: ["pending", "active", "completed"] },
-      status: { $ne: "cancelled" }
+      status: { $in: ["active", "cancelled"] }
     }).sort({ createdAt: -1 });
 
     const filteredOrders = req.staffUser.role === "admin" 
