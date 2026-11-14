@@ -27,7 +27,7 @@ export default function App() {
   
   // NEW: Driver Interface States
   const [driverTab, setDriverTab] = useState("active"); 
-  const [expandedChatOrderId, setExpandedChatOrderId] = useState(null);
+  const [expandedChatConvId, setExpandedChatConvId] = useState(null);
   const [driverReplyText, setDriverReplyText] = useState("");
 
   const [itemDistances, setItemDistances] = useState({});
@@ -134,7 +134,10 @@ export default function App() {
       }
       if (convsRes.ok) {
         const convsData = await convsRes.json();
-        setConversations(Array.isArray(convsData) ? convsData : []);
+        const validConvs = Array.isArray(convsData) ? convsData : [];
+        // Filtering conversations for dual-chat logic
+        const myConvs = validConvs.filter(c => c?.buyerName === currentUser?.name || c?.sellerName === currentUser?.name);
+        setConversations(myConvs);
       }
     } catch (err) {
       console.error("Error loading driver data:", err);
@@ -529,8 +532,8 @@ export default function App() {
       });
       if (res.ok) {
         loadDriverData();
-        setExpandedChatOrderId(null); // close chat if open
-        setDriverTab("active"); // switch back to active pool
+        setExpandedChatConvId(null); 
+        setDriverTab("active"); 
       } else {
         const data = await res.json();
         alert(data.error || "Failed to cancel assignment");
@@ -548,7 +551,7 @@ export default function App() {
       });
       if (res.ok) {
         loadDriverData();
-        setDriverTab("completed"); // Move them to completed tab
+        setDriverTab("completed"); 
       } else {
         const data = await res.json();
         alert(data.error || "Failed to complete delivery");
@@ -636,7 +639,7 @@ export default function App() {
   const myListings = (listings || []).filter((item) => item?.sellerId === currentUser?.id);
   const favouriteListings = (listings || []).filter((item) => favouriteIds.includes(item?._id));
   
-  // CRASH-PROOFED Buyer/Seller Standalone Messages Tab
+  // STANDARD USER MESSAGES TAB (Hidden if driver)
   const renderMessagesTab = () => {
     try {
       const convArray = Array.isArray(conversations) ? conversations : [];
@@ -712,7 +715,7 @@ export default function App() {
           <div className="space-y-3">
             <h3 className="text-red-600 font-bold">Failed to render messages screen.</h3>
             <p className="text-slate-500 text-xs">{err.message}</p>
-            <button onClick={loadMarketplaceData} className="bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-lg">Retry</button>
+            <button onClick={loadMarketplaceData} className="bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-lg">Retry Loading Data</button>
           </div>
         </div>
       );
@@ -743,8 +746,11 @@ export default function App() {
       activeTab={activeTab}
       setActiveTab={setActiveTab}
       currentUser={currentUser}
+      // Provide hideMessagesTab for safety depending on your portal implementation
+      hideMessagesTab={isDriver}
       counts={{
-        unreadMessages: Array.isArray(conversations) ? conversations.length : 0,
+        // 0 out unread messages if it is a driver to de-emphasize standard tab logic
+        unreadMessages: isDriver ? 0 : (Array.isArray(conversations) ? conversations.length : 0),
         myListings: myListings?.length || 0,
         favourites: favouriteListings?.length || 0,
         cart: cart.reduce((sum, i) => sum + Number(i?.quantity || 1), 0),
@@ -765,28 +771,29 @@ export default function App() {
                 </button>
               </div>
 
-              {/* NEW: Driver Tabs */}
+              {/* Driver UI Tab Navigation */}
               <div className="flex flex-wrap gap-2 bg-slate-100 p-1.5 rounded-lg w-fit">
                 <button 
-                  onClick={() => setDriverTab("active")} 
+                  onClick={() => { setDriverTab("active"); setExpandedChatConvId(null); }} 
                   className={`px-4 py-2 rounded-md text-xs font-bold transition-colors ${driverTab === "active" ? "bg-white shadow text-slate-900" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50"}`}
                 >
                   All Active Requests
                 </button>
                 <button 
-                  onClick={() => setDriverTab("my")} 
+                  onClick={() => { setDriverTab("my"); setExpandedChatConvId(null); }} 
                   className={`px-4 py-2 rounded-md text-xs font-bold transition-colors ${driverTab === "my" ? "bg-white shadow text-slate-900" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50"}`}
                 >
                   My Requests
                 </button>
                 <button 
-                  onClick={() => setDriverTab("completed")} 
+                  onClick={() => { setDriverTab("completed"); setExpandedChatConvId(null); }} 
                   className={`px-4 py-2 rounded-md text-xs font-bold transition-colors ${driverTab === "completed" ? "bg-white shadow text-slate-900" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50"}`}
                 >
                   Completed Requests
                 </button>
               </div>
               
+              {/* Filter driver tab content block */}
               {(() => {
                 const safeDriverOrders = Array.isArray(driverOrders) ? driverOrders : [];
                 const filteredForTab = safeDriverOrders.filter(order => {
@@ -814,144 +821,166 @@ export default function App() {
 
                 return (
                   <div className="space-y-4">
-                    {filteredForTab.map((order) => (
-                      <div key={order._id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                        <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-                          <div>
-                            <span className="font-black text-slate-900">{order.orderNumber}</span>
-                            <span className={`ml-3 text-[11px] font-bold px-2.5 py-1 rounded-full ${
-                              order.dispatchStatus === 'pending' ? 'bg-amber-100 text-amber-800' : 
-                              order.dispatchStatus === 'active' ? 'bg-blue-100 text-blue-800' :
-                              'bg-emerald-100 text-emerald-800'
-                            }`}>
-                              {order.dispatchStatus === 'pending' ? '⏳ Pending Dispatch' : 
-                               order.dispatchStatus === 'active' ? '🚚 Active (In Transit)' :
-                               '✅ Completed'}
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-500">Placed: {new Date(order.createdAt).toLocaleString()}</p>
-                        </div>
-                        
-                        {(order.items || []).filter(i => i.deliveryMethod === 'delivery').map((item, idx) => (
-                          <div key={idx} className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
-                            <p className="font-bold text-slate-900 text-sm">{item.quantity}x {item.title}</p>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                              <div className="bg-white p-3 rounded border border-slate-200">
-                                <p className="font-bold text-slate-500 uppercase mb-1">Pickup From (Seller)</p>
-                                <p className="font-semibold text-slate-800">{item.sellerName}</p>
-                                <p className="text-slate-600">{item.sellerLocation}</p>
-                              </div>
-                              
-                              <div className="bg-white p-3 rounded border border-slate-200">
-                                <p className="font-bold text-slate-500 uppercase mb-1">Deliver To (Buyer)</p>
-                                <p className="font-semibold text-slate-800">{order.buyerName} ({order.buyerContact})</p>
-                                {item.buyerLocationType === 'pin' ? (
-                                  <a href={item.buyerPin} target="_blank" rel="noreferrer" className="text-blue-600 underline font-semibold break-all">📍 View Pin Drop Location</a>
-                                ) : (
-                                  <p className="text-slate-600">{item.buyerAddress}</p>
-                                )}
-                              </div>
+                    {filteredForTab.map((order) => {
+                      const orderConvs = conversations.filter(c => c.orderId === order._id && c.isDeliveryChat);
+
+                      return (
+                        <div key={order._id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                          <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                            <div>
+                              <span className="font-black text-slate-900">{order.orderNumber}</span>
+                              <span className={`ml-3 text-[11px] font-bold px-2.5 py-1 rounded-full ${
+                                order.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                                order.dispatchStatus === 'pending' ? 'bg-amber-100 text-amber-800' : 
+                                order.dispatchStatus === 'active' ? 'bg-blue-100 text-blue-800' :
+                                'bg-emerald-100 text-emerald-800'
+                              }`}>
+                                {order.status === 'cancelled' ? '❌ Cancelled by Admin' :
+                                 order.dispatchStatus === 'pending' ? '⏳ Pending Dispatch' : 
+                                 order.dispatchStatus === 'active' ? '🚚 Active (In Transit)' :
+                                 '✅ Completed'}
+                              </span>
                             </div>
-
-                            {item.specialInstructions && (
-                              <div className="mt-2 bg-amber-50 p-3 rounded-lg border border-amber-200 text-xs">
-                                <span className="font-bold text-amber-800">Special Instructions: </span>
-                                <span className="text-amber-900">{item.specialInstructions}</span>
-                              </div>
-                            )}
+                            <p className="text-xs text-slate-500">Placed: {new Date(order.createdAt).toLocaleString()}</p>
                           </div>
-                        ))}
-
-                        {/* NEW: Driver Action Buttons based on status */}
-                        {order.dispatchStatus === 'pending' && (
-                          <button 
-                            onClick={() => handleAcceptDelivery(order._id)}
-                            className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-lg shadow-md transition-colors mt-2"
-                          >
-                            Accept Delivery Request
-                          </button>
-                        )}
-                        
-                        {order.dispatchStatus === 'active' && (
-                          <>
-                            <div className="flex flex-col sm:flex-row gap-2 mt-3 pt-3 border-t border-slate-100">
-                              <button 
-                                onClick={() => handleCancelDriverAssignment(order._id)}
-                                className="flex-1 bg-red-50 hover:bg-red-100 text-red-700 font-bold py-3 rounded-lg shadow-sm border border-red-200 text-xs transition-colors"
-                              >
-                                Cancel Request
-                              </button>
-                              <button 
-                                onClick={() => setExpandedChatOrderId(expandedChatOrderId === order._id ? null : order._id)}
-                                className={`flex-1 font-bold py-3 rounded-lg shadow-sm border text-xs transition-colors ${expandedChatOrderId === order._id ? "bg-slate-800 text-white border-slate-900" : "bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"}`}
-                              >
-                                💬 {expandedChatOrderId === order._id ? "Close Chat" : "Message"}
-                              </button>
-                              <button 
-                                onClick={() => handleCompleteDelivery(order._id)}
-                                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-sm border border-emerald-600 text-xs transition-colors"
-                              >
-                                ✓ Complete
-                              </button>
-                            </div>
-
-                            {/* NEW: Embedded Inline Chat for the Driver */}
-                            {expandedChatOrderId === order._id && (() => {
-                              const orderConv = conversations.find(c => c.orderId === order._id && c.isDeliveryChat);
-                              if (!orderConv) return <div className="mt-4 p-4 text-center text-slate-500 text-xs bg-slate-50 rounded-xl border border-slate-200">Generating secure delivery chat... Please wait.</div>;
+                          
+                          {(order.items || []).filter(i => i.deliveryMethod === 'delivery').map((item, idx) => (
+                            <div key={idx} className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
+                              <p className="font-bold text-slate-900 text-sm">{item.quantity}x {item.title}</p>
                               
-                              return (
-                                <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden bg-slate-50 flex flex-col h-[350px] animate-in fade-in slide-in-from-top-2">
-                                  <div className="bg-slate-900 text-white px-4 py-2.5 text-xs font-bold flex justify-between items-center">
-                                    <span>Delivery Chat: {order.orderNumber}</span>
-                                    <button onClick={() => setExpandedChatOrderId(null)} className="hover:text-red-400">✕ Close</button>
-                                  </div>
-                                  <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                                    {(Array.isArray(orderConv.messages) ? orderConv.messages : []).map((m, mIdx) => {
-                                      if (!m) return null;
-                                      const msgId = m._id || `msg-${mIdx}`;
-                                      const isMe = m.sender === currentUser?.name;
-                                      const isAdminMsg = m.sender === "GoGyMarket Admin" || m.sender === "GoGyMarket Dispatch";
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                                <div className="bg-white p-3 rounded border border-slate-200">
+                                  <p className="font-bold text-slate-500 uppercase mb-1">Pickup From (Seller)</p>
+                                  <p className="font-semibold text-slate-800">{item.sellerName}</p>
+                                  <p className="text-slate-600">{item.sellerLocation}</p>
+                                </div>
+                                
+                                <div className="bg-white p-3 rounded border border-slate-200">
+                                  <p className="font-bold text-slate-500 uppercase mb-1">Deliver To (Buyer)</p>
+                                  <p className="font-semibold text-slate-800">{order.buyerName} ({order.buyerContact})</p>
+                                  {item.buyerLocationType === 'pin' ? (
+                                    <a href={item.buyerPin} target="_blank" rel="noreferrer" className="text-blue-600 underline font-semibold break-all">📍 View Pin Drop Location</a>
+                                  ) : (
+                                    <p className="text-slate-600">{item.buyerAddress}</p>
+                                  )}
+                                </div>
+                              </div>
+
+                              {item.specialInstructions && (
+                                <div className="mt-2 bg-amber-50 p-3 rounded-lg border border-amber-200 text-xs">
+                                  <span className="font-bold text-amber-800">Special Instructions: </span>
+                                  <span className="text-amber-900">{item.specialInstructions}</span>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+
+                          {order.dispatchStatus === 'pending' && order.status === 'active' && (
+                            <button 
+                              onClick={() => handleAcceptDelivery(order._id)}
+                              className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-lg shadow-md transition-colors mt-2"
+                            >
+                              Accept Delivery Request
+                            </button>
+                          )}
+                          
+                          {(order.dispatchStatus === 'active' || order.dispatchStatus === 'completed') && order.status === 'active' && (
+                            <>
+                              {order.dispatchStatus === 'active' && (
+                                <div className="flex flex-col sm:flex-row gap-2 mt-3 pt-3 border-t border-slate-100">
+                                  <button 
+                                    onClick={() => handleCancelDriverAssignment(order._id)}
+                                    className="flex-1 bg-red-50 hover:bg-red-100 text-red-700 font-bold py-2.5 rounded-lg shadow-sm border border-red-200 text-xs transition-colors"
+                                  >
+                                    Cancel Request
+                                  </button>
+                                  <button 
+                                    onClick={() => handleCompleteDelivery(order._id)}
+                                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg shadow-sm border border-emerald-600 text-xs transition-colors"
+                                  >
+                                    ✓ Complete Delivery
+                                  </button>
+                                </div>
+                              )}
+
+                              {orderConvs.length > 0 && (
+                                <div className="mt-3 pt-3 border-t border-slate-100 space-y-3">
+                                  <p className="text-xs font-bold text-slate-500 uppercase">Order Communications</p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {orderConvs.map(conv => {
+                                      const isDropoff = conv.listingTitle.includes("Dropoff");
+                                      const roleLabel = isDropoff ? "Buyer" : "Seller";
+                                      const otherParty = isDropoff ? conv.buyerName : conv.sellerName;
+                                      const isExpanded = expandedChatConvId === conv._id;
+                                      
                                       return (
-                                        <div key={msgId} className={`flex flex-col ${isAdminMsg ? "items-center" : isMe ? "items-end" : "items-start"}`}>
-                                          <div className={`px-4 py-2.5 rounded-xl text-sm max-w-[85%] whitespace-pre-wrap ${isAdminMsg ? "bg-amber-50 border border-amber-300 text-amber-950 font-medium" : isMe ? "bg-emerald-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
-                                            {m.text || ""}
-                                          </div>
-                                          <span className="text-[10px] text-slate-400 mt-1 px-1">{m.sender || "Unknown"} • {m.time || ""}</span>
-                                        </div>
+                                        <button 
+                                          key={conv._id}
+                                          onClick={() => setExpandedChatConvId(isExpanded ? null : conv._id)}
+                                          className={`flex-1 font-bold py-2.5 px-3 rounded-lg shadow-sm border text-xs transition-colors flex items-center justify-center gap-1.5 ${isExpanded ? "bg-slate-800 text-white border-slate-900" : "bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"}`}
+                                        >
+                                          💬 Message {roleLabel} ({otherParty}) {isExpanded ? "▾" : "▸"}
+                                        </button>
                                       );
                                     })}
                                   </div>
-                                  <form onSubmit={(e) => {
-                                    e.preventDefault();
-                                    if (!driverReplyText.trim()) return;
-                                    fetch(`${API_BASE}/api/conversations/${orderConv._id}/messages`, {
-                                      method: "POST",
-                                      headers: { "Content-Type": "application/json" },
-                                      body: JSON.stringify({ sender: currentUser.name, text: driverReplyText.trim() })
-                                    }).then(res => res.json()).then(updatedConv => {
-                                      setConversations(prev => prev.map(c => c._id === orderConv._id ? updatedConv : c));
-                                      setDriverReplyText("");
-                                    });
-                                  }} className="p-3 bg-white border-t border-slate-200 flex gap-2">
-                                    <input type="text" placeholder="Message buyer or seller..." value={driverReplyText} onChange={(e) => setDriverReplyText(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-emerald-500" />
-                                    <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors">Send</button>
-                                  </form>
+
+                                  {orderConvs.map(conv => {
+                                    if (expandedChatConvId !== conv._id) return null;
+                                    return (
+                                      <div key={`chat-${conv._id}`} className="mt-2 border border-slate-200 rounded-xl overflow-hidden bg-slate-50 flex flex-col h-[350px] animate-in fade-in slide-in-from-top-2">
+                                        <div className="bg-slate-900 text-white px-4 py-2.5 text-xs font-bold flex justify-between items-center">
+                                          <span>{conv.listingTitle}</span>
+                                          <button onClick={() => setExpandedChatConvId(null)} className="hover:text-red-400">✕ Close</button>
+                                        </div>
+                                        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                                          {(Array.isArray(conv.messages) ? conv.messages : []).map((m, mIdx) => {
+                                            if (!m) return null;
+                                            const msgId = m._id || `msg-${mIdx}`;
+                                            const isMe = m.sender === currentUser?.name;
+                                            const isAdminMsg = m.sender === "GoGyMarket Admin" || m.sender === "GoGyMarket Dispatch";
+                                            return (
+                                              <div key={msgId} className={`flex flex-col ${isAdminMsg ? "items-center" : isMe ? "items-end" : "items-start"}`}>
+                                                <div className={`px-4 py-2.5 rounded-xl text-sm max-w-[85%] whitespace-pre-wrap ${isAdminMsg ? "bg-amber-50 border border-amber-300 text-amber-950 font-medium" : isMe ? "bg-emerald-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
+                                                  {m.text || ""}
+                                                </div>
+                                                <span className="text-[10px] text-slate-400 mt-1 px-1">{m.sender || "Unknown"} • {m.time || ""}</span>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                        <form onSubmit={(e) => {
+                                          e.preventDefault();
+                                          if (!driverReplyText.trim()) return;
+                                          fetch(`${API_BASE}/api/conversations/${conv._id}/messages`, {
+                                            method: "POST",
+                                            headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({ sender: currentUser.name, text: driverReplyText.trim() })
+                                          }).then(res => res.json()).then(updatedConv => {
+                                            setConversations(prev => prev.map(c => c._id === conv._id ? updatedConv : c));
+                                            setDriverReplyText("");
+                                          });
+                                        }} className="p-3 bg-white border-t border-slate-200 flex gap-2">
+                                          <input type="text" placeholder="Type a message..." value={driverReplyText} onChange={(e) => setDriverReplyText(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-emerald-500" />
+                                          <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors">Send</button>
+                                        </form>
+                                      </div>
+                                    )
+                                  })}
                                 </div>
-                              );
-                            })()}
-                          </>
-                        )}
-                      </div>
-                    ))}
+                              )}
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })()}
             </div>
           )}
           
-          {/* Prevent Driver from using standalone messages tab to avoid mix-ups */}
+          {/* Force completely null messaging block so driver cannot possibly view standard chat tabs */}
           {activeTab === "messages" && (
             <div className="bg-white p-12 rounded-xl border border-slate-200 text-center space-y-3">
               <h3 className="font-bold text-slate-900 text-lg">Delivery Messaging System</h3>
@@ -1456,8 +1485,8 @@ export default function App() {
             </div>
           )}
 
-          {/* User Messages Tab */}
-          {activeTab === "messages" && renderMessagesTab()}
+          {/* STANDARD USER MESSAGES TAB (Hidden if Driver) */}
+          {!isDriver && activeTab === "messages" && renderMessagesTab()}
 
           {activeTab === "post" && (
             <PostListingForm
@@ -1527,7 +1556,7 @@ export default function App() {
                                 stockCount: item.stockCount,
                                 isLocationMasked: item.isLocationMasked !== false,
                                 isOversized: item.isOversized || false,
-                                condition: item.condition || "New"
+                                condition: item.condition || "New" 
                               });
                             }}
                             className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold px-3 py-1.5 rounded-lg"
