@@ -25,8 +25,10 @@ export default function App() {
   const [listings, setListings] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   
-  // NEW: Driver Sub-tab management
-  const [driverTab, setDriverTab] = useState("active"); // "active", "my", "cancelled"
+  // NEW: Driver Interface States
+  const [driverTab, setDriverTab] = useState("active"); 
+  const [expandedChatOrderId, setExpandedChatOrderId] = useState(null);
+  const [driverReplyText, setDriverReplyText] = useState("");
 
   const [itemDistances, setItemDistances] = useState({});
 
@@ -132,10 +134,7 @@ export default function App() {
       }
       if (convsRes.ok) {
         const convsData = await convsRes.json();
-        const validConvs = Array.isArray(convsData) ? convsData : [];
-        const myConvs = validConvs.filter(c => c?.buyerName === currentUser?.name || c?.sellerName === currentUser?.name);
-        setConversations(myConvs);
-        if (myConvs.length > 0 && !activeConvId) setActiveConvId(myConvs[0]._id);
+        setConversations(Array.isArray(convsData) ? convsData : []);
       }
     } catch (err) {
       console.error("Error loading driver data:", err);
@@ -512,9 +511,29 @@ export default function App() {
       });
       if (res.ok) {
         loadDriverData();
+        setDriverTab("my"); // Auto switch tab to show them their new accepted request
       } else {
         const data = await res.json();
         alert(data.error || "Failed to accept delivery");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleCancelDriverAssignment = async (orderId) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/driver/orders/${orderId}/cancel-assignment`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${localStorage.getItem("gogy_token")}` }
+      });
+      if (res.ok) {
+        loadDriverData();
+        setExpandedChatOrderId(null); // close chat if open
+        setDriverTab("active"); // switch back to active pool
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to cancel assignment");
       }
     } catch (err) {
       console.error(err);
@@ -529,6 +548,7 @@ export default function App() {
       });
       if (res.ok) {
         loadDriverData();
+        setDriverTab("completed"); // Move them to completed tab
       } else {
         const data = await res.json();
         alert(data.error || "Failed to complete delivery");
@@ -616,14 +636,12 @@ export default function App() {
   const myListings = (listings || []).filter((item) => item?.sellerId === currentUser?.id);
   const favouriteListings = (listings || []).filter((item) => favouriteIds.includes(item?._id));
   
-  // CRASH-PROOFED Active Conversation Lookup
-  const activeConversation = Array.isArray(conversations) ? conversations.find((c) => c?._id === activeConvId) : null;
-
-  // CRASH-PROOFED Messages Renderer
+  // CRASH-PROOFED Buyer/Seller Standalone Messages Tab
   const renderMessagesTab = () => {
     try {
       const convArray = Array.isArray(conversations) ? conversations : [];
-      
+      const activeConversation = convArray.find((c) => c?._id === activeConvId);
+
       return (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden grid grid-cols-1 md:grid-cols-3 min-h-[480px]">
           <div className="border-r border-slate-200 p-4 space-y-2 overflow-y-auto max-h-[480px]">
@@ -694,7 +712,7 @@ export default function App() {
           <div className="space-y-3">
             <h3 className="text-red-600 font-bold">Failed to render messages screen.</h3>
             <p className="text-slate-500 text-xs">{err.message}</p>
-            <button onClick={loadMarketplaceData} className="bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-lg">Retry Loading Data</button>
+            <button onClick={loadMarketplaceData} className="bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-lg">Retry</button>
           </div>
         </div>
       );
@@ -747,7 +765,7 @@ export default function App() {
                 </button>
               </div>
 
-              {/* NEW: Driver UI Tab Navigation */}
+              {/* NEW: Driver Tabs */}
               <div className="flex flex-wrap gap-2 bg-slate-100 p-1.5 rounded-lg w-fit">
                 <button 
                   onClick={() => setDriverTab("active")} 
@@ -762,14 +780,13 @@ export default function App() {
                   My Requests
                 </button>
                 <button 
-                  onClick={() => setDriverTab("cancelled")} 
-                  className={`px-4 py-2 rounded-md text-xs font-bold transition-colors ${driverTab === "cancelled" ? "bg-white shadow text-slate-900" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50"}`}
+                  onClick={() => setDriverTab("completed")} 
+                  className={`px-4 py-2 rounded-md text-xs font-bold transition-colors ${driverTab === "completed" ? "bg-white shadow text-slate-900" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50"}`}
                 >
-                  Cancelled Requests
+                  Completed Requests
                 </button>
               </div>
               
-              {/* NEW: Filter driver tab content block */}
               {(() => {
                 const safeDriverOrders = Array.isArray(driverOrders) ? driverOrders : [];
                 const filteredForTab = safeDriverOrders.filter(order => {
@@ -778,11 +795,11 @@ export default function App() {
                   }
                   if (driverTab === "my") {
                     return String(order.driverId) === String(currentUser.id) && 
-                           (order.dispatchStatus === "active" || order.dispatchStatus === "completed") && 
+                           order.dispatchStatus === "active" && 
                            order.status === "active";
                   }
-                  if (driverTab === "cancelled") {
-                    return String(order.driverId) === String(currentUser.id) && order.status === "cancelled";
+                  if (driverTab === "completed") {
+                    return String(order.driverId) === String(currentUser.id) && order.dispatchStatus === "completed";
                   }
                   return false;
                 });
@@ -803,13 +820,11 @@ export default function App() {
                           <div>
                             <span className="font-black text-slate-900">{order.orderNumber}</span>
                             <span className={`ml-3 text-[11px] font-bold px-2.5 py-1 rounded-full ${
-                              order.status === 'cancelled' ? 'bg-red-100 text-red-800' :
                               order.dispatchStatus === 'pending' ? 'bg-amber-100 text-amber-800' : 
                               order.dispatchStatus === 'active' ? 'bg-blue-100 text-blue-800' :
                               'bg-emerald-100 text-emerald-800'
                             }`}>
-                              {order.status === 'cancelled' ? '❌ Cancelled by Admin' :
-                               order.dispatchStatus === 'pending' ? '⏳ Pending Dispatch' : 
+                              {order.dispatchStatus === 'pending' ? '⏳ Pending Dispatch' : 
                                order.dispatchStatus === 'active' ? '🚚 Active (In Transit)' :
                                '✅ Completed'}
                             </span>
@@ -848,7 +863,8 @@ export default function App() {
                           </div>
                         ))}
 
-                        {order.dispatchStatus === 'pending' && order.status === 'active' && (
+                        {/* NEW: Driver Action Buttons based on status */}
+                        {order.dispatchStatus === 'pending' && (
                           <button 
                             onClick={() => handleAcceptDelivery(order._id)}
                             className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-lg shadow-md transition-colors mt-2"
@@ -856,13 +872,76 @@ export default function App() {
                             Accept Delivery Request
                           </button>
                         )}
-                        {order.dispatchStatus === 'active' && order.status === 'active' && (
-                          <button 
-                            onClick={() => handleCompleteDelivery(order._id)}
-                            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-md transition-colors mt-2"
-                          >
-                            ✓ Mark Delivery as Completed
-                          </button>
+                        
+                        {order.dispatchStatus === 'active' && (
+                          <>
+                            <div className="flex flex-col sm:flex-row gap-2 mt-3 pt-3 border-t border-slate-100">
+                              <button 
+                                onClick={() => handleCancelDriverAssignment(order._id)}
+                                className="flex-1 bg-red-50 hover:bg-red-100 text-red-700 font-bold py-3 rounded-lg shadow-sm border border-red-200 text-xs transition-colors"
+                              >
+                                Cancel Request
+                              </button>
+                              <button 
+                                onClick={() => setExpandedChatOrderId(expandedChatOrderId === order._id ? null : order._id)}
+                                className={`flex-1 font-bold py-3 rounded-lg shadow-sm border text-xs transition-colors ${expandedChatOrderId === order._id ? "bg-slate-800 text-white border-slate-900" : "bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"}`}
+                              >
+                                💬 {expandedChatOrderId === order._id ? "Close Chat" : "Message"}
+                              </button>
+                              <button 
+                                onClick={() => handleCompleteDelivery(order._id)}
+                                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-sm border border-emerald-600 text-xs transition-colors"
+                              >
+                                ✓ Complete
+                              </button>
+                            </div>
+
+                            {/* NEW: Embedded Inline Chat for the Driver */}
+                            {expandedChatOrderId === order._id && (() => {
+                              const orderConv = conversations.find(c => c.orderId === order._id && c.isDeliveryChat);
+                              if (!orderConv) return <div className="mt-4 p-4 text-center text-slate-500 text-xs bg-slate-50 rounded-xl border border-slate-200">Generating secure delivery chat... Please wait.</div>;
+                              
+                              return (
+                                <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden bg-slate-50 flex flex-col h-[350px] animate-in fade-in slide-in-from-top-2">
+                                  <div className="bg-slate-900 text-white px-4 py-2.5 text-xs font-bold flex justify-between items-center">
+                                    <span>Delivery Chat: {order.orderNumber}</span>
+                                    <button onClick={() => setExpandedChatOrderId(null)} className="hover:text-red-400">✕ Close</button>
+                                  </div>
+                                  <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                                    {(Array.isArray(orderConv.messages) ? orderConv.messages : []).map((m, mIdx) => {
+                                      if (!m) return null;
+                                      const msgId = m._id || `msg-${mIdx}`;
+                                      const isMe = m.sender === currentUser?.name;
+                                      const isAdminMsg = m.sender === "GoGyMarket Admin" || m.sender === "GoGyMarket Dispatch";
+                                      return (
+                                        <div key={msgId} className={`flex flex-col ${isAdminMsg ? "items-center" : isMe ? "items-end" : "items-start"}`}>
+                                          <div className={`px-4 py-2.5 rounded-xl text-sm max-w-[85%] whitespace-pre-wrap ${isAdminMsg ? "bg-amber-50 border border-amber-300 text-amber-950 font-medium" : isMe ? "bg-emerald-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
+                                            {m.text || ""}
+                                          </div>
+                                          <span className="text-[10px] text-slate-400 mt-1 px-1">{m.sender || "Unknown"} • {m.time || ""}</span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                  <form onSubmit={(e) => {
+                                    e.preventDefault();
+                                    if (!driverReplyText.trim()) return;
+                                    fetch(`${API_BASE}/api/conversations/${orderConv._id}/messages`, {
+                                      method: "POST",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ sender: currentUser.name, text: driverReplyText.trim() })
+                                    }).then(res => res.json()).then(updatedConv => {
+                                      setConversations(prev => prev.map(c => c._id === orderConv._id ? updatedConv : c));
+                                      setDriverReplyText("");
+                                    });
+                                  }} className="p-3 bg-white border-t border-slate-200 flex gap-2">
+                                    <input type="text" placeholder="Message buyer or seller..." value={driverReplyText} onChange={(e) => setDriverReplyText(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-emerald-500" />
+                                    <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors">Send</button>
+                                  </form>
+                                </div>
+                              );
+                            })()}
+                          </>
                         )}
                       </div>
                     ))}
@@ -871,7 +950,17 @@ export default function App() {
               })()}
             </div>
           )}
-          {activeTab === "messages" && renderMessagesTab()}
+          
+          {/* Prevent Driver from using standalone messages tab to avoid mix-ups */}
+          {activeTab === "messages" && (
+            <div className="bg-white p-12 rounded-xl border border-slate-200 text-center space-y-3">
+              <h3 className="font-bold text-slate-900 text-lg">Delivery Messaging System</h3>
+              <p className="text-slate-500 text-sm">To prevent sending messages to the wrong client, driver communications are now managed securely inside your <span className="font-bold text-slate-700">My Requests</span> tab.</p>
+              <button onClick={() => setActiveTab("driver")} className="mt-4 bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-lg text-sm font-bold shadow-sm transition-colors">
+                Go to Driver Portal
+              </button>
+            </div>
+          )}
         </>
       ) : isStaff ? (
         activeTab === "admin" && (
