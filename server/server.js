@@ -804,6 +804,7 @@ app.get("/api/driver/orders", verifyStaff, async (req, res) => {
   }
 });
 
+// NEW: Dual-Chat Creation on Driver Acceptance
 app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can accept delivery requests." });
@@ -818,19 +819,39 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
     await order.save();
 
     const formattedTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    
+    // Create Chat 1: Driver -> Buyer
     await Conversation.create({
       listingId: String(order._id),
-      listingTitle: `Delivery: Order ${order.orderNumber}`,
-      buyerName: order.buyerName,
+      listingTitle: `Delivery Dropoff (Order ${order.orderNumber})`,
+      buyerName: order.buyerName, 
       sellerName: req.staffUser.name, 
       isDeliveryChat: true,
       orderId: String(order._id),
       messages: [{ 
         sender: "GoGyMarket Dispatch", 
-        text: `Driver ${req.staffUser.name} has accepted your delivery! You can message them directly in this thread.`, 
+        text: `Driver ${req.staffUser.name} has accepted your delivery and is on the way! You can message them directly in this thread.`, 
         time: formattedTime 
       }]
     });
+
+    // Create Chat 2+: Driver -> Seller(s)
+    const uniqueSellers = [...new Set(order.items.map(i => i.sellerName))];
+    for (const sName of uniqueSellers) {
+      await Conversation.create({
+        listingId: String(order._id),
+        listingTitle: `Delivery Pickup (Order ${order.orderNumber})`,
+        buyerName: req.staffUser.name, 
+        sellerName: sName,
+        isDeliveryChat: true,
+        orderId: String(order._id),
+        messages: [{ 
+          sender: "GoGyMarket Dispatch", 
+          text: `Driver ${req.staffUser.name} is on the way to pick up an order! You can message them directly in this thread.`, 
+          time: formattedTime 
+        }]
+      });
+    }
 
     res.json(order);
   } catch (err) {
@@ -838,7 +859,7 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
   }
 });
 
-// NEW: Driver endpoint to cancel an accepted request
+// NEW: Driver Cancel Assignment (Updates all dual-chats)
 app.patch("/api/driver/orders/:id/cancel-assignment", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can cancel their assignment." });
@@ -855,14 +876,15 @@ app.patch("/api/driver/orders/:id/cancel-assignment", verifyStaff, async (req, r
     await order.save();
 
     const formattedTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const deliveryConv = await Conversation.findOne({ orderId: String(order._id), isDeliveryChat: true });
-    if (deliveryConv) {
-      deliveryConv.messages.push({
+    const deliveryConvs = await Conversation.find({ orderId: String(order._id), isDeliveryChat: true });
+    
+    for (const c of deliveryConvs) {
+      c.messages.push({
         sender: "GoGyMarket Dispatch",
         text: `⚠️ Driver ${req.staffUser.name} has cancelled their assignment. This request is now pending a new driver.`,
         time: formattedTime
       });
-      await deliveryConv.save();
+      await c.save();
     }
 
     res.json(order);
@@ -871,6 +893,7 @@ app.patch("/api/driver/orders/:id/cancel-assignment", verifyStaff, async (req, r
   }
 });
 
+// NEW: Driver Complete Delivery (Updates all dual-chats)
 app.patch("/api/driver/orders/:id/complete", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can complete delivery requests." });
@@ -885,21 +908,15 @@ app.patch("/api/driver/orders/:id/complete", verifyStaff, async (req, res) => {
     await order.save();
 
     const formattedTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const deliveryConv = await Conversation.findOne({ orderId: String(order._id), isDeliveryChat: true });
-    if (deliveryConv) {
-      deliveryConv.messages.push({
+    const deliveryConvs = await Conversation.find({ orderId: String(order._id), isDeliveryChat: true });
+    
+    for (const c of deliveryConvs) {
+      c.messages.push({
         sender: "GoGyMarket Dispatch",
         text: `🏁 DELIVERY COMPLETED: ${req.staffUser.name} has marked this delivery as successfully dropped off!`,
         time: formattedTime
       });
-      await deliveryConv.save();
-    }
-
-    for (const item of order.items) {
-      await sendOrderNotification({
-        listingId: item.listingId, listingTitle: item.title, buyerName: order.buyerName, sellerName: item.sellerName,
-        text: `🚚 DELIVERY COMPLETED\nOrder: ${order.orderNumber}\nItem: ${item.quantity}x ${item.title}\n\nThe delivery driver (${order.driverName}) has marked this order as successfully delivered!`
-      });
+      await c.save();
     }
     
     res.json(order);
