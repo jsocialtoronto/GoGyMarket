@@ -789,8 +789,6 @@ app.get("/api/driver/orders", verifyStaff, async (req, res) => {
       return res.status(403).json({ error: "Driver or Admin access required." });
     }
     
-    // STRICT DRIVER FILTER: Orders MUST be fully "active" (meaning paid/verified)
-    // or "cancelled" (so drivers know an order they accepted was voided).
     const orders = await Order.find({
       dispatchStatus: { $in: ["pending", "active", "completed"] },
       status: { $in: ["active", "cancelled"] }
@@ -833,6 +831,39 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
         time: formattedTime 
       }]
     });
+
+    res.json(order);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// NEW: Driver endpoint to cancel an accepted request
+app.patch("/api/driver/orders/:id/cancel-assignment", verifyStaff, async (req, res) => {
+  try {
+    if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can cancel their assignment." });
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ error: "Order not found." });
+    if (String(order.driverId) !== String(req.staffUser._id)) {
+      return res.status(403).json({ error: "You are not assigned to this delivery." });
+    }
+    if (order.dispatchStatus !== "active") return res.status(400).json({ error: "This delivery is not currently active." });
+
+    order.dispatchStatus = "pending";
+    order.driverId = null;
+    order.driverName = null;
+    await order.save();
+
+    const formattedTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const deliveryConv = await Conversation.findOne({ orderId: String(order._id), isDeliveryChat: true });
+    if (deliveryConv) {
+      deliveryConv.messages.push({
+        sender: "GoGyMarket Dispatch",
+        text: `⚠️ Driver ${req.staffUser.name} has cancelled their assignment. This request is now pending a new driver.`,
+        time: formattedTime
+      });
+      await deliveryConv.save();
+    }
 
     res.json(order);
   } catch (err) {
