@@ -79,9 +79,13 @@ export default function App() {
   const loadMarketplaceData = async () => {
     try {
       setIsLoading(true);
+      
+      // NEW: Cache-busting timestamp to prevent stale searches when switching test accounts
+      const timestamp = Date.now();
+      
       const [listingsRes, convsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/listings`),
-        fetch(`${API_BASE}/api/conversations`)
+        fetch(`${API_BASE}/api/listings?t=${timestamp}`),
+        fetch(`${API_BASE}/api/conversations?t=${timestamp}`)
       ]);
 
       if (listingsRes.ok) {
@@ -98,8 +102,8 @@ export default function App() {
 
       if (currentUser && !isStaff && !isDriver) {
         const [ordersRes, ratingsRes] = await Promise.all([
-          fetch(`${API_BASE}/api/orders/user/${currentUser.id}`),
-          fetch(`${API_BASE}/api/ratings`)
+          fetch(`${API_BASE}/api/orders/user/${currentUser.id}?t=${timestamp}`),
+          fetch(`${API_BASE}/api/ratings?t=${timestamp}`)
         ]);
         if (ordersRes.ok) {
           const oData = await ordersRes.json();
@@ -120,11 +124,12 @@ export default function App() {
   const loadDriverData = async () => {
     try {
       setIsLoading(true);
+      const timestamp = Date.now();
       const [ordersRes, convsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/driver/orders`, {
+        fetch(`${API_BASE}/api/driver/orders?t=${timestamp}`, {
           headers: { Authorization: `Bearer ${localStorage.getItem("gogy_token")}` }
         }),
-        fetch(`${API_BASE}/api/conversations`)
+        fetch(`${API_BASE}/api/conversations?t=${timestamp}`)
       ]);
 
       if (ordersRes.ok) {
@@ -560,13 +565,15 @@ export default function App() {
     }
   };
 
-  // UPDATE: Removed the aggressive sellerId filter so you can see your own items while testing!
+  // UPDATE: Restored the rule preventing users from seeing their own posts
   const filteredListings = useMemo(() => {
     let result = (listings || []).filter((item) => {
       if (!item) return false;
       
-      // Disabled temporarily so you can see the listings you just created in the search feed!
-      // if (currentUser && item.sellerId === currentUser.id) return false;
+      // RESTORED: Hide users' own listings from the public search feed
+      if (currentUser && String(item.sellerId) === String(currentUser.id)) {
+        return false;
+      }
       
       const stock = item.stockCount != null ? Number(item.stockCount) : 1;
       if (item.status === "sold" || stock <= 0) return false;
@@ -585,7 +592,7 @@ export default function App() {
       return matchesKeyword && matchesCat && matchesSub && matchesMinPrice && matchesMaxPrice && matchesLocation;
     });
 
-    return result.slice(0, 50); // Expanded feed limit for testing
+    return result.slice(0, 10);
   }, [listings, searchQuery, selectedCat, selectedSubcat, minPrice, maxPrice, locationFilter, currentUser]);
 
   useEffect(() => {
@@ -890,12 +897,6 @@ export default function App() {
                                     className="flex-1 bg-red-50 hover:bg-red-100 text-red-700 font-bold py-2.5 rounded-lg shadow-sm border border-red-200 text-xs transition-colors"
                                   >
                                     Cancel Request
-                                  </button>
-                                  <button 
-                                    onClick={() => setExpandedChatConvId(expandedChatConvId === order._id ? null : order._id)}
-                                    className={`flex-1 font-bold py-3 rounded-lg shadow-sm border text-xs transition-colors ${expandedChatConvId === order._id ? "bg-slate-800 text-white border-slate-900" : "bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"}`}
-                                  >
-                                    💬 {expandedChatConvId === order._id ? "Close Chat" : "Message"}
                                   </button>
                                   <button 
                                     onClick={() => handleCompleteDelivery(order._id)}
@@ -1486,9 +1487,6 @@ export default function App() {
               )}
             </div>
           )}
-
-          {/* STANDARD USER MESSAGES TAB (Hidden if Driver) */}
-          {!isDriver && activeTab === "messages" && renderMessagesTab()}
 
           {activeTab === "post" && (
             <PostListingForm
