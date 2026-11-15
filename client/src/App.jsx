@@ -25,7 +25,6 @@ export default function App() {
   const [listings, setListings] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   
-  // NEW: Driver Interface States
   const [driverTab, setDriverTab] = useState("active"); 
   const [expandedChatConvId, setExpandedChatConvId] = useState(null);
   const [driverReplyText, setDriverReplyText] = useState("");
@@ -135,9 +134,9 @@ export default function App() {
       if (convsRes.ok) {
         const convsData = await convsRes.json();
         const validConvs = Array.isArray(convsData) ? convsData : [];
-        // Filtering conversations for dual-chat logic
         const myConvs = validConvs.filter(c => c?.buyerName === currentUser?.name || c?.sellerName === currentUser?.name);
         setConversations(myConvs);
+        if (myConvs.length > 0 && !activeConvId) setActiveConvId(myConvs[0]._id);
       }
     } catch (err) {
       console.error("Error loading driver data:", err);
@@ -514,7 +513,7 @@ export default function App() {
       });
       if (res.ok) {
         loadDriverData();
-        setDriverTab("my"); // Auto switch tab to show them their new accepted request
+        setDriverTab("my"); 
       } else {
         const data = await res.json();
         alert(data.error || "Failed to accept delivery");
@@ -561,10 +560,13 @@ export default function App() {
     }
   };
 
+  // UPDATE: Removed the aggressive sellerId filter so you can see your own items while testing!
   const filteredListings = useMemo(() => {
     let result = (listings || []).filter((item) => {
       if (!item) return false;
-      if (currentUser && item.sellerId === currentUser.id) return false;
+      
+      // Disabled temporarily so you can see the listings you just created in the search feed!
+      // if (currentUser && item.sellerId === currentUser.id) return false;
       
       const stock = item.stockCount != null ? Number(item.stockCount) : 1;
       if (item.status === "sold" || stock <= 0) return false;
@@ -583,7 +585,7 @@ export default function App() {
       return matchesKeyword && matchesCat && matchesSub && matchesMinPrice && matchesMaxPrice && matchesLocation;
     });
 
-    return result.slice(0, 10);
+    return result.slice(0, 50); // Expanded feed limit for testing
   }, [listings, searchQuery, selectedCat, selectedSubcat, minPrice, maxPrice, locationFilter, currentUser]);
 
   useEffect(() => {
@@ -639,7 +641,6 @@ export default function App() {
   const myListings = (listings || []).filter((item) => item?.sellerId === currentUser?.id);
   const favouriteListings = (listings || []).filter((item) => favouriteIds.includes(item?._id));
   
-  // STANDARD USER MESSAGES TAB (Hidden if driver)
   const renderMessagesTab = () => {
     try {
       const convArray = Array.isArray(conversations) ? conversations : [];
@@ -746,10 +747,8 @@ export default function App() {
       activeTab={activeTab}
       setActiveTab={setActiveTab}
       currentUser={currentUser}
-      // Provide hideMessagesTab for safety depending on your portal implementation
       hideMessagesTab={isDriver}
       counts={{
-        // 0 out unread messages if it is a driver to de-emphasize standard tab logic
         unreadMessages: isDriver ? 0 : (Array.isArray(conversations) ? conversations.length : 0),
         myListings: myListings?.length || 0,
         favourites: favouriteListings?.length || 0,
@@ -771,7 +770,6 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Driver UI Tab Navigation */}
               <div className="flex flex-wrap gap-2 bg-slate-100 p-1.5 rounded-lg w-fit">
                 <button 
                   onClick={() => { setDriverTab("active"); setExpandedChatConvId(null); }} 
@@ -793,7 +791,6 @@ export default function App() {
                 </button>
               </div>
               
-              {/* Filter driver tab content block */}
               {(() => {
                 const safeDriverOrders = Array.isArray(driverOrders) ? driverOrders : [];
                 const filteredForTab = safeDriverOrders.filter(order => {
@@ -895,6 +892,12 @@ export default function App() {
                                     Cancel Request
                                   </button>
                                   <button 
+                                    onClick={() => setExpandedChatConvId(expandedChatConvId === order._id ? null : order._id)}
+                                    className={`flex-1 font-bold py-3 rounded-lg shadow-sm border text-xs transition-colors ${expandedChatConvId === order._id ? "bg-slate-800 text-white border-slate-900" : "bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"}`}
+                                  >
+                                    💬 {expandedChatConvId === order._id ? "Close Chat" : "Message"}
+                                  </button>
+                                  <button 
                                     onClick={() => handleCompleteDelivery(order._id)}
                                     className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg shadow-sm border border-emerald-600 text-xs transition-colors"
                                   >
@@ -980,7 +983,6 @@ export default function App() {
             </div>
           )}
           
-          {/* Force completely null messaging block so driver cannot possibly view standard chat tabs */}
           {activeTab === "messages" && (
             <div className="bg-white p-12 rounded-xl border border-slate-200 text-center space-y-3">
               <h3 className="font-bold text-slate-900 text-lg">Delivery Messaging System</h3>
@@ -1556,7 +1558,7 @@ export default function App() {
                                 stockCount: item.stockCount,
                                 isLocationMasked: item.isLocationMasked !== false,
                                 isOversized: item.isOversized || false,
-                                condition: item.condition || "New" 
+                                condition: item.condition || "New"
                               });
                             }}
                             className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold px-3 py-1.5 rounded-lg"
