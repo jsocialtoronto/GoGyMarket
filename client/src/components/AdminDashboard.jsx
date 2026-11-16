@@ -14,6 +14,9 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
   const [previewPhoto, setPreviewPhoto] = useState(null);
+  
+  // NEW: Developer Settings Toggle State
+  const [showDevSettings, setShowDevSettings] = useState(false);
 
   const [newRole, setNewRole] = useState("user");
   const [newAccountType, setNewAccountType] = useState("personal");
@@ -235,7 +238,6 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
     }
   };
 
-  // NEW: Emergency Nuke Database Handler
   const handleEmergencyWipe = async () => {
     if (!isFullAdmin) return;
     const confirmed = window.confirm(
@@ -255,6 +257,7 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
       setFeedback({ type: "success", text: data.message });
       fetchAdminData();
       if (onOrdersUpdated) onOrdersUpdated();
+      setShowDevSettings(false); // Auto-hide the button after wiping
     } catch (err) {
       setFeedback({ type: "error", text: err.message });
     }
@@ -300,14 +303,27 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* NEW: Database Wipe Button */}
+          {/* UPDATED: Hidden Developer Settings Toggle */}
           {isFullAdmin && (
-            <button
-              onClick={handleEmergencyWipe}
-              className="px-4 py-2 rounded-lg text-xs font-bold bg-red-600 hover:bg-red-500 text-white shadow-sm border border-red-700 mr-2"
-            >
-              🚨 Wipe All Listings (Fix Crash)
-            </button>
+            <div className="flex items-center gap-3 bg-slate-800 px-3 py-2 rounded-lg border border-slate-700 mr-2">
+               <label className="flex items-center gap-2 text-xs font-bold text-slate-300 cursor-pointer hover:text-white">
+                 <input 
+                   type="checkbox" 
+                   checked={showDevSettings} 
+                   onChange={(e) => setShowDevSettings(e.target.checked)} 
+                   className="w-3.5 h-3.5 accent-red-500"
+                 />
+                 Developer Settings
+               </label>
+               {showDevSettings && (
+                 <button
+                   onClick={handleEmergencyWipe}
+                   className="px-3 py-1 rounded text-xs font-bold bg-red-600 hover:bg-red-500 text-white shadow-sm border border-red-700 animate-in fade-in"
+                 >
+                   🚨 Wipe All Listings
+                 </button>
+               )}
+            </div>
           )}
 
           <button
