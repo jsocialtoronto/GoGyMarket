@@ -673,26 +673,6 @@ export default function App() {
   const favouriteListings = (listings || []).filter((item) => favouriteIds.includes(item?._id));
 
   // ==========================================
-  // HELPER: Lookup True Item Image and Title
-  // ==========================================
-  const getConvItemData = (listingId) => {
-    let title = "Item Inquiry";
-    let img = "";
-    
-    const orderMatch = myOrders.find(o => o.items?.some(i => String(i.listingId) === String(listingId)));
-    if (orderMatch) {
-      const itemMatch = orderMatch.items.find(i => String(i.listingId) === String(listingId));
-      if (itemMatch?.title) title = itemMatch.title;
-      if (itemMatch?.image) img = itemMatch.image;
-    } else {
-      const listingMatch = listings.find(l => String(l._id) === String(listingId));
-      if (listingMatch?.title) title = listingMatch.title;
-      if (listingMatch?.images?.[0]) img = listingMatch.images[0];
-    }
-    return { title, img };
-  };
-
-  // ==========================================
   // RENDER UI
   // ==========================================
   if (!currentUser) {
@@ -809,12 +789,12 @@ export default function App() {
                           <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                             <div className="flex items-center gap-3">
                                {headerImg ? (
-                                  <img src={headerImg} alt="Thumbnail" className="w-12 h-12 rounded object-cover border" />
+                                  <img src={headerImg} alt="Thumbnail" className="w-12 h-12 rounded object-cover border shadow-sm" />
                                ) : (
                                   <div className="w-12 h-12 rounded bg-slate-100 border flex items-center justify-center text-xl">📦</div>
                                )}
                                <div>
-                                  <h3 className="font-black text-slate-900 leading-tight">{headerTitle}</h3>
+                                  <h3 className="font-black text-slate-900 leading-tight line-clamp-1">{headerTitle}</h3>
                                   <div className="flex items-center gap-2 mt-1">
                                      <span className="text-xs font-semibold text-slate-500">{order.orderNumber}</span>
                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
@@ -1490,7 +1470,7 @@ export default function App() {
             </div>
           )}
 
-          {/* BUYER/SELLER MESSAGES TAB - NOW SAFELY INLINE WITH NO CRASHES AND TRUE IMAGE */}
+          {/* BUYER/SELLER MESSAGES TAB - BULLETPROOF RENDER WITH DYNAMIC THUMBNAIL/TITLE LOOKUP */}
           {!isDriver && activeTab === "messages" && (
             <div className="max-w-5xl mx-auto space-y-6">
               <div>
@@ -1499,7 +1479,6 @@ export default function App() {
               </div>
               
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden grid grid-cols-1 md:grid-cols-3 h-[500px]">
-                {/* 1. SIDEBAR */}
                 <div className="border-r border-slate-200 flex flex-col h-full bg-white">
                   <div className="p-4 border-b border-slate-100 shrink-0">
                     <h2 className="font-bold text-sm uppercase tracking-wider text-slate-500">Conversations</h2>
@@ -1509,13 +1488,14 @@ export default function App() {
                       <p className="text-xs text-slate-400 text-center mt-4">No messages yet.</p>
                     ) : (
                       conversations.map((conv) => {
-                        if (!conv) return null;
+                        if (!conv || !conv._id) return null;
                         
                         let sidebarTitle = conv.listingTitle;
-                        if (!sidebarTitle || sidebarTitle === "Item Inquiry") {
-                           const matchOrder = myOrders.find(o => o.items?.some(i => String(i.listingId) === String(conv.listingId)));
+                        if (!sidebarTitle || sidebarTitle.includes("Order")) {
+                           const matchOrder = myOrders.find(o => o.items?.some(i => String(i.listingId) === String(conv.listingId) || String(o._id) === String(conv.listingId)));
                            if (matchOrder) {
-                             sidebarTitle = matchOrder.items.find(i => String(i.listingId) === String(conv.listingId))?.title;
+                             const matchedItem = matchOrder.items.find(i => String(i.listingId) === String(conv.listingId)) || matchOrder.items[0];
+                             sidebarTitle = matchedItem?.title;
                            } else {
                              const matchListing = listings.find(l => String(l._id) === String(conv.listingId));
                              if (matchListing) sidebarTitle = matchListing.title;
@@ -1558,7 +1538,6 @@ export default function App() {
                   </div>
                 </div>
                 
-                {/* 2. MAIN CHAT AREA */}
                 <div className="md:col-span-2 flex flex-col bg-slate-50 h-full relative">
                   {(conversations && conversations.length > 0) ? (
                     (() => {
@@ -1569,15 +1548,14 @@ export default function App() {
                       let headerImage = "";
                       let displayTitle = activeChat.listingTitle;
 
-                      // Use real actual image and title from matched orders or live listings
-                      const matchedOrder = myOrders.find(o => o.items?.some(i => String(i.listingId) === String(activeChat.listingId)));
+                      const matchedOrder = myOrders.find(o => o.items?.some(i => String(i.listingId) === String(activeChat.listingId) || String(o._id) === String(activeChat.listingId)));
                       if (matchedOrder) {
-                        const matchedItem = matchedOrder.items.find(i => String(i.listingId) === String(activeChat.listingId));
+                        const matchedItem = matchedOrder.items.find(i => String(i.listingId) === String(activeChat.listingId)) || matchedOrder.items[0];
                         if (matchedItem?.image) headerImage = matchedItem.image;
                         if (matchedItem?.title) displayTitle = matchedItem.title;
                       }
 
-                      if (!headerImage || !displayTitle || displayTitle === "Item Inquiry") {
+                      if (!headerImage || !displayTitle || displayTitle.includes("Order")) {
                         const matchedListing = listings.find(l => String(l._id) === String(activeChat.listingId));
                         if (matchedListing) {
                           if (!headerImage && matchedListing.images?.[0]) headerImage = matchedListing.images[0];
@@ -1612,8 +1590,6 @@ export default function App() {
                               if (!m || typeof m !== 'object') return null;
                               const msgId = m._id ? String(m._id) : `msg-${idx}`;
                               const senderName = String(m.sender || "Unknown");
-                              const msgText = String(m.text || "");
-                              const msgTime = String(m.time || "");
                               
                               const isMe = senderName === String(currentUser?.name);
                               const isAdminMsg = senderName.includes("Admin") || senderName.includes("Dispatch");
@@ -1629,13 +1605,13 @@ export default function App() {
                                       <button onClick={() => handleDeleteMessage(activeChat._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
                                     )}
                                     <div className={`px-4 py-2.5 rounded-xl text-sm max-w-[85%] whitespace-pre-wrap ${bubbleClass}`}>
-                                      {msgText}
+                                      {String(m.text || "")}
                                     </div>
                                     {!isMe && !isAdminMsg && m._id && (
                                       <button onClick={() => handleDeleteMessage(activeChat._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
                                     )}
                                   </div>
-                                  <span className="text-[10px] text-slate-400 mt-1 px-1">{senderName} • {msgTime}</span>
+                                  <span className="text-[10px] text-slate-400 mt-1 px-1">{senderName} • {String(m.time || "")}</span>
                                 </div>
                               );
                             })}
