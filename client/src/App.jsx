@@ -30,6 +30,7 @@ export default function App() {
   const [driverReplyText, setDriverReplyText] = useState("");
 
   const [itemDistances, setItemDistances] = useState({});
+  const [showOwnListings, setShowOwnListings] = useState(false);
 
   const [favouriteIds, setFavouriteIds] = useState(() => {
     try {
@@ -79,8 +80,6 @@ export default function App() {
   const loadMarketplaceData = async () => {
     try {
       setIsLoading(true);
-      
-      // NEW: Cache-busting timestamp to prevent stale searches when switching test accounts
       const timestamp = Date.now();
       
       const [listingsRes, convsRes] = await Promise.all([
@@ -91,7 +90,10 @@ export default function App() {
       if (listingsRes.ok) {
         const listingsData = await listingsRes.json();
         setListings(Array.isArray(listingsData) ? listingsData : []);
+      } else {
+        console.error("Server refused listing fetch. Likely due to payload size limit from giant photos.");
       }
+
       if (convsRes.ok) {
         const convsData = await convsRes.json();
         const validConvs = Array.isArray(convsData) ? convsData : [];
@@ -565,13 +567,11 @@ export default function App() {
     }
   };
 
-  // UPDATE: Restored the rule preventing users from seeing their own posts
   const filteredListings = useMemo(() => {
     let result = (listings || []).filter((item) => {
       if (!item) return false;
       
-      // RESTORED: Hide users' own listings from the public search feed
-      if (currentUser && String(item.sellerId) === String(currentUser.id)) {
+      if (!showOwnListings && currentUser && String(item.sellerId) === String(currentUser.id)) {
         return false;
       }
       
@@ -593,7 +593,7 @@ export default function App() {
     });
 
     return result.slice(0, 10);
-  }, [listings, searchQuery, selectedCat, selectedSubcat, minPrice, maxPrice, locationFilter, currentUser]);
+  }, [listings, searchQuery, selectedCat, selectedSubcat, minPrice, maxPrice, locationFilter, currentUser, showOwnListings]);
 
   useEffect(() => {
     if (!currentUser?.location || activeTab !== "search" || filteredListings.length === 0) return;
@@ -645,7 +645,8 @@ export default function App() {
     };
   }, [filteredListings, currentUser, activeTab]); 
 
-  const myListings = (listings || []).filter((item) => item?.sellerId === currentUser?.id);
+  // STRICT String matching ensures exact matches across component re-renders
+  const myListings = (listings || []).filter((item) => String(item?.sellerId) === String(currentUser?.id));
   const favouriteListings = (listings || []).filter((item) => favouriteIds.includes(item?._id));
   
   const renderMessagesTab = () => {
@@ -1137,7 +1138,7 @@ export default function App() {
               </aside>
 
               <section className="md:col-span-3 space-y-4">
-                <div className="bg-white p-3 rounded-xl border border-slate-200 flex flex-wrap gap-2 items-center justify-between">
+                <div className="bg-white p-3 rounded-xl border border-slate-200 flex flex-col sm:flex-row flex-wrap gap-3 items-start sm:items-center justify-between">
                   <input
                     type="text"
                     placeholder="Search products or services across GoGyMarket..."
@@ -1145,6 +1146,23 @@ export default function App() {
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="flex-1 min-w-[220px] px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-500"
                   />
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-1.5 text-xs font-bold text-slate-500 cursor-pointer hover:text-slate-800">
+                      <input 
+                        type="checkbox" 
+                        checked={showOwnListings} 
+                        onChange={e => setShowOwnListings(e.target.checked)} 
+                        className="w-3.5 h-3.5 accent-emerald-600" 
+                      />
+                      Show My Own Posts (Test Mode)
+                    </label>
+                    <button 
+                      onClick={loadMarketplaceData} 
+                      className="text-emerald-700 font-bold text-xs bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-2 rounded-lg transition-colors shadow-sm"
+                    >
+                      ↻ Refresh DB
+                    </button>
+                  </div>
                 </div>
 
                 {isLoading ? (
