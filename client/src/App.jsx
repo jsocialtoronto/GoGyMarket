@@ -142,7 +142,6 @@ export default function App() {
         const validConvs = Array.isArray(convsData) ? convsData : [];
         const myConvs = validConvs.filter(c => c?.buyerName === currentUser?.name || c?.sellerName === currentUser?.name);
         setConversations(myConvs);
-        if (myConvs.length > 0 && !activeConvId) setActiveConvId(myConvs[0]._id);
       }
     } catch (err) {
       console.error("Error loading driver data:", err);
@@ -436,18 +435,18 @@ export default function App() {
     }
   };
 
-  const handleSendReply = async (e) => {
+  const handleSendReply = async (e, convIdToUse) => {
     e.preventDefault();
-    if (!replyText.trim() || !activeConvId) return;
+    if (!replyText.trim() || !convIdToUse) return;
     try {
-      const res = await fetch(`${API_BASE}/api/conversations/${activeConvId}/messages`, {
+      const res = await fetch(`${API_BASE}/api/conversations/${convIdToUse}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sender: currentUser.name, text: replyText.trim() })
       });
       if (res.ok) {
         const updatedConv = await res.json();
-        setConversations((prev) => prev.map((c) => (c._id === activeConvId ? updatedConv : c)));
+        setConversations((prev) => prev.map((c) => (c._id === convIdToUse ? updatedConv : c)));
         setReplyText("");
       }
     } catch (err) {
@@ -647,36 +646,41 @@ export default function App() {
   const myListings = (listings || []).filter((item) => String(item?.sellerId) === String(currentUser?.id));
   const favouriteListings = (listings || []).filter((item) => favouriteIds.includes(item?._id));
   
-  // FIXED: Fortified, crash-proof standard Buyer/Seller Messages Tab
+  // FIXED: Bulletproof Buyer/Seller Messages Component
   const renderMessagesTab = () => {
-    const convArray = Array.isArray(conversations) ? conversations : [];
+    const validConvs = Array.isArray(conversations) ? conversations.filter(c => c && c._id) : [];
     
-    if (convArray.length === 0) {
+    if (validConvs.length === 0) {
       return (
-        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center min-h-[480px] flex items-center justify-center">
+        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center min-h-[480px] flex items-center justify-center shadow-sm">
           <div className="space-y-3">
-             <h3 className="font-bold text-slate-700">No active conversations.</h3>
-             <p className="text-slate-500 text-xs">Reach out to a seller to get started.</p>
+             <h3 className="font-bold text-slate-700 text-lg">No active conversations</h3>
+             <p className="text-slate-500 text-sm">Reach out to a seller to get started.</p>
           </div>
         </div>
       );
     }
-    
-    const activeConversation = convArray.find((c) => c && c._id === activeConvId);
+
+    const activeConversation = validConvs.find((c) => String(c._id) === String(activeConvId)) || validConvs[0];
+    const validMessages = Array.isArray(activeConversation?.messages) ? activeConversation.messages : [];
 
     return (
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden grid grid-cols-1 md:grid-cols-3 min-h-[480px]">
         <div className="border-r border-slate-200 p-4 space-y-2 overflow-y-auto max-h-[480px]">
           <h2 className="font-bold text-sm uppercase tracking-wider text-slate-500 mb-3">Conversations</h2>
-          {convArray.map((conv) => {
-            if (!conv || !conv._id) return null;
-            const otherPersonName = (conv.sellerName === currentUser?.name) ? conv.buyerName : conv.sellerName;
-            // Extremely safe string fallback to prevent raw undefined crashes
-            const titleStr = conv.listingTitle || "Item Inquiry";
+          {validConvs.map((conv) => {
+            const isMeSeller = String(conv.sellerName) === String(currentUser?.name);
+            const otherPersonName = isMeSeller ? String(conv.buyerName) : String(conv.sellerName);
+            const titleStr = String(conv.listingTitle || "Item Inquiry");
             const isDispatch = Boolean(conv.isDeliveryChat);
+            const isSelected = String(activeConversation._id) === String(conv._id);
 
             return (
-              <div key={conv._id} onClick={() => setActiveConvId(conv._id)} className={`p-3 rounded-lg cursor-pointer border transition-colors ${activeConvId === conv._id ? "bg-emerald-50 border-emerald-300" : "border-slate-200 hover:bg-slate-50"}`}>
+              <div 
+                key={conv._id} 
+                onClick={() => setActiveConvId(conv._id)} 
+                className={`p-3 rounded-lg cursor-pointer border transition-colors ${isSelected ? "bg-emerald-50 border-emerald-300" : "border-slate-200 hover:bg-slate-50"}`}
+              >
                 <div className="flex justify-between items-start text-xs font-bold text-slate-800">
                   <div className="flex-1">
                     <span>{otherPersonName || "Unknown User"}</span>
@@ -691,40 +695,35 @@ export default function App() {
         </div>
         
         <div className="md:col-span-2 flex flex-col justify-between p-4 bg-slate-50">
-          {activeConversation ? (
-            <>
-              <div className="space-y-4 overflow-y-auto max-h-80 pr-2">
-                {(Array.isArray(activeConversation.messages) ? activeConversation.messages : []).map((m, idx) => {
-                  if (!m) return null;
-                  const msgId = m._id || `msg-${idx}`;
-                  const isMe = m.sender === currentUser?.name;
-                  const isAdminMsg = m.sender === "GoGyMarket Admin" || m.sender === "GoGyMarket Dispatch";
-                  return (
-                    <div key={msgId} className={`flex flex-col ${isAdminMsg ? "items-center" : isMe ? "items-end" : "items-start"}`}>
-                      <div className="flex items-center gap-2">
-                        {isMe && !isAdminMsg && m._id && (
-                          <button onClick={() => handleDeleteMessage(activeConversation._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
-                        )}
-                        <div className={`px-4 py-2.5 rounded-xl text-sm max-w-md whitespace-pre-wrap ${isAdminMsg ? "bg-amber-50 border border-amber-300 text-amber-950 font-medium" : isMe ? "bg-emerald-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
-                          {m.text || ""}
-                        </div>
-                        {!isMe && !isAdminMsg && m._id && (
-                          <button onClick={() => handleDeleteMessage(activeConversation._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
-                        )}
-                      </div>
-                      <span className="text-[10px] text-slate-400 mt-1 px-1">{m.sender || "Unknown"} • {m.time || ""}</span>
+          <div className="space-y-4 overflow-y-auto max-h-80 pr-2">
+            {validMessages.map((m, idx) => {
+              if (!m) return null;
+              const msgId = m._id ? String(m._id) : `msg-${idx}`;
+              const isMe = String(m.sender) === String(currentUser?.name);
+              const isAdminMsg = String(m.sender).includes("Admin") || String(m.sender).includes("Dispatch");
+              
+              return (
+                <div key={msgId} className={`flex flex-col ${isAdminMsg ? "items-center" : isMe ? "items-end" : "items-start"}`}>
+                  <div className="flex items-center gap-2">
+                    {isMe && !isAdminMsg && m._id && (
+                      <button onClick={() => handleDeleteMessage(activeConversation._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
+                    )}
+                    <div className={`px-4 py-2.5 rounded-xl text-sm max-w-md whitespace-pre-wrap ${isAdminMsg ? "bg-amber-50 border border-amber-300 text-amber-950 font-medium" : isMe ? "bg-emerald-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
+                      {m.text ? String(m.text) : ""}
                     </div>
-                  );
-                })}
-              </div>
-              <form onSubmit={handleSendReply} className="mt-4 flex gap-2">
-                <input type="text" placeholder="Write a message..." value={replyText} onChange={(e) => setReplyText(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-emerald-500" />
-                <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors">Send</button>
-              </form>
-            </>
-          ) : (
-            <div className="m-auto text-center text-slate-400 text-sm">Select a conversation on the left to view messages.</div>
-          )}
+                    {!isMe && !isAdminMsg && m._id && (
+                      <button onClick={() => handleDeleteMessage(activeConversation._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-slate-400 mt-1 px-1">{m.sender ? String(m.sender) : "Unknown"} • {m.time ? String(m.time) : ""}</span>
+                </div>
+              );
+            })}
+          </div>
+          <form onSubmit={(e) => handleSendReply(e, activeConversation._id)} className="mt-4 flex gap-2">
+            <input type="text" placeholder="Write a message..." value={replyText} onChange={(e) => setReplyText(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-emerald-500" />
+            <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors">Send</button>
+          </form>
         </div>
       </div>
     );
@@ -826,16 +825,14 @@ export default function App() {
                 return (
                   <div className="space-y-4">
                     {filteredForTab.map((order) => {
-                      // FIXED: Maps driver messages and explicitly purges duplicates from the UI caused by DB bloat
+                      // FIXED: Extracts ONLY ONE unique Dropoff chat and ONE unique Pickup chat for the driver.
                       const orderConvsRaw = (Array.isArray(conversations) ? conversations : []).filter(c => c && c.orderId === order._id && c.isDeliveryChat);
-                      const uniqueConvsMap = new Map();
-                      orderConvsRaw.forEach(c => {
-                        const title = c.listingTitle || "Delivery Chat";
-                        if (!uniqueConvsMap.has(title)) {
-                           uniqueConvsMap.set(title, c);
-                        }
-                      });
-                      const orderConvs = Array.from(uniqueConvsMap.values());
+                      const dropoffChats = orderConvsRaw.filter(c => String(c.listingTitle || "").includes("Dropoff"));
+                      const pickupChats = orderConvsRaw.filter(c => String(c.listingTitle || "").includes("Pickup"));
+                      
+                      const displayChats = [];
+                      if (dropoffChats.length > 0) displayChats.push({ label: "Buyer", conv: dropoffChats[0], party: dropoffChats[0].buyerName });
+                      if (pickupChats.length > 0) displayChats.push({ label: "Seller", conv: pickupChats[0], party: pickupChats[0].sellerName });
 
                       return (
                         <div key={order._id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
@@ -916,43 +913,39 @@ export default function App() {
                                 </div>
                               )}
 
-                              {orderConvs.length > 0 && (
+                              {displayChats.length > 0 && (
                                 <div className="mt-3 pt-3 border-t border-slate-100 space-y-3">
                                   <p className="text-xs font-bold text-slate-500 uppercase">Order Communications</p>
                                   <div className="flex flex-wrap gap-2">
-                                    {orderConvs.map(conv => {
-                                      const titleStr = String(conv.listingTitle || "");
-                                      const isDropoff = titleStr.includes("Dropoff");
-                                      const roleLabel = isDropoff ? "Buyer" : "Seller";
-                                      const otherParty = isDropoff ? (conv.buyerName || "Unknown") : (conv.sellerName || "Unknown");
-                                      const isExpanded = expandedChatConvId === conv._id;
+                                    {displayChats.map(chatInfo => {
+                                      const isExpanded = expandedChatConvId === chatInfo.conv._id;
                                       
                                       return (
                                         <button 
-                                          key={conv._id}
-                                          onClick={() => setExpandedChatConvId(isExpanded ? null : conv._id)}
+                                          key={chatInfo.conv._id}
+                                          onClick={() => setExpandedChatConvId(isExpanded ? null : chatInfo.conv._id)}
                                           className={`flex-1 font-bold py-2.5 px-3 rounded-lg shadow-sm border text-xs transition-colors flex items-center justify-center gap-1.5 ${isExpanded ? "bg-slate-800 text-white border-slate-900" : "bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"}`}
                                         >
-                                          💬 Message {roleLabel} ({otherParty}) {isExpanded ? "▾" : "▸"}
+                                          💬 Message {chatInfo.label} ({chatInfo.party}) {isExpanded ? "▾" : "▸"}
                                         </button>
                                       );
                                     })}
                                   </div>
 
-                                  {orderConvs.map(conv => {
-                                    if (expandedChatConvId !== conv._id) return null;
+                                  {displayChats.map(chatInfo => {
+                                    if (expandedChatConvId !== chatInfo.conv._id) return null;
                                     return (
-                                      <div key={`chat-${conv._id}`} className="mt-2 border border-slate-200 rounded-xl overflow-hidden bg-slate-50 flex flex-col h-[350px] animate-in fade-in slide-in-from-top-2">
+                                      <div key={`chat-${chatInfo.conv._id}`} className="mt-2 border border-slate-200 rounded-xl overflow-hidden bg-slate-50 flex flex-col h-[350px] animate-in fade-in slide-in-from-top-2">
                                         <div className="bg-slate-900 text-white px-4 py-2.5 text-xs font-bold flex justify-between items-center">
-                                          <span>{conv.listingTitle || "Delivery Chat"}</span>
+                                          <span>{chatInfo.conv.listingTitle || "Delivery Chat"}</span>
                                           <button onClick={() => setExpandedChatConvId(null)} className="hover:text-red-400">✕ Close</button>
                                         </div>
                                         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                                          {(Array.isArray(conv.messages) ? conv.messages : []).map((m, mIdx) => {
+                                          {(Array.isArray(chatInfo.conv.messages) ? chatInfo.conv.messages : []).map((m, mIdx) => {
                                             if (!m) return null;
                                             const msgId = m._id || `msg-${mIdx}`;
-                                            const isMe = m.sender === currentUser?.name;
-                                            const isAdminMsg = m.sender === "GoGyMarket Admin" || m.sender === "GoGyMarket Dispatch";
+                                            const isMe = String(m.sender) === String(currentUser?.name);
+                                            const isAdminMsg = String(m.sender).includes("Admin") || String(m.sender).includes("Dispatch");
                                             return (
                                               <div key={msgId} className={`flex flex-col ${isAdminMsg ? "items-center" : isMe ? "items-end" : "items-start"}`}>
                                                 <div className={`px-4 py-2.5 rounded-xl text-sm max-w-[85%] whitespace-pre-wrap ${isAdminMsg ? "bg-amber-50 border border-amber-300 text-amber-950 font-medium" : isMe ? "bg-emerald-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
@@ -966,12 +959,12 @@ export default function App() {
                                         <form onSubmit={(e) => {
                                           e.preventDefault();
                                           if (!driverReplyText.trim()) return;
-                                          fetch(`${API_BASE}/api/conversations/${conv._id}/messages`, {
+                                          fetch(`${API_BASE}/api/conversations/${chatInfo.conv._id}/messages`, {
                                             method: "POST",
                                             headers: { "Content-Type": "application/json" },
                                             body: JSON.stringify({ sender: currentUser.name, text: driverReplyText.trim() })
                                           }).then(res => res.json()).then(updatedConv => {
-                                            setConversations(prev => prev.map(c => c._id === conv._id ? updatedConv : c));
+                                            setConversations(prev => prev.map(c => c._id === chatInfo.conv._id ? updatedConv : c));
                                             setDriverReplyText("");
                                           });
                                         }} className="p-3 bg-white border-t border-slate-200 flex gap-2">
@@ -991,16 +984,6 @@ export default function App() {
                   </div>
                 );
               })()}
-            </div>
-          )}
-          
-          {activeTab === "messages" && (
-            <div className="bg-white p-12 rounded-xl border border-slate-200 text-center space-y-3">
-              <h3 className="font-bold text-slate-900 text-lg">Delivery Messaging System</h3>
-              <p className="text-slate-500 text-sm">To prevent sending messages to the wrong client, driver communications are now managed securely inside your <span className="font-bold text-slate-700">My Requests</span> tab.</p>
-              <button onClick={() => setActiveTab("driver")} className="mt-4 bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-lg text-sm font-bold shadow-sm transition-colors">
-                Go to Driver Portal
-              </button>
             </div>
           )}
         </>
@@ -1514,6 +1497,9 @@ export default function App() {
               )}
             </div>
           )}
+
+          {/* STANDARD USER MESSAGES TAB */}
+          {!isDriver && activeTab === "messages" && renderMessagesTab()}
 
           {activeTab === "post" && (
             <PostListingForm
