@@ -17,6 +17,7 @@ app.use(
   })
 );
 
+// Global Cache-Busting Middleware to prevent stale requests
 app.use((req, res, next) => {
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   res.setHeader("Pragma", "no-cache");
@@ -820,7 +821,6 @@ app.get("/api/driver/orders", verifyStaff, async (req, res) => {
   }
 });
 
-// FIXED: Driver Acceptance Logic (Stops Duplicate Chats & Spammed Messages)
 app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can accept delivery requests." });
@@ -837,7 +837,7 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
     const formattedTime = new Date().toLocaleTimeString("en-US", { timeZone: "America/Guyana", hour: "2-digit", minute: "2-digit" });
     const acceptMsg = "Driver has accepted the order.";
     
-    // 1. Check if Dropoff Chat (Driver <-> Buyer) exists.
+    // Create or update Driver -> Buyer (Dropoff) Chat
     let dropoffConv = await Conversation.findOne({ orderId: String(order._id), isDeliveryChat: true, listingTitle: { $regex: /Dropoff/i } });
     if (!dropoffConv) {
       await Conversation.create({
@@ -858,7 +858,7 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
       await dropoffConv.save();
     }
 
-    // 2. Check if Pickup Chats (Driver <-> Sellers) exist.
+    // Create or update Driver -> Seller (Pickup) Chat
     const uniqueSellers = [...new Set(order.items.map(i => i.sellerName))];
     for (const sName of uniqueSellers) {
       let pickupConv = await Conversation.findOne({ orderId: String(order._id), isDeliveryChat: true, listingTitle: { $regex: /Pickup/i }, sellerName: sName });
