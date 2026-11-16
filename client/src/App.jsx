@@ -673,6 +673,26 @@ export default function App() {
   const favouriteListings = (listings || []).filter((item) => favouriteIds.includes(item?._id));
 
   // ==========================================
+  // HELPER: Lookup True Item Image and Title
+  // ==========================================
+  const getConvItemData = (listingId) => {
+    let title = "Item Inquiry";
+    let img = "";
+    
+    const orderMatch = myOrders.find(o => o.items?.some(i => String(i.listingId) === String(listingId)));
+    if (orderMatch) {
+      const itemMatch = orderMatch.items.find(i => String(i.listingId) === String(listingId));
+      if (itemMatch?.title) title = itemMatch.title;
+      if (itemMatch?.image) img = itemMatch.image;
+    } else {
+      const listingMatch = listings.find(l => String(l._id) === String(listingId));
+      if (listingMatch?.title) title = listingMatch.title;
+      if (listingMatch?.images?.[0]) img = listingMatch.images[0];
+    }
+    return { title, img };
+  };
+
+  // ==========================================
   // RENDER UI
   // ==========================================
   if (!currentUser) {
@@ -779,24 +799,39 @@ export default function App() {
                       if (pickupChats.length > 0) displayChats.push({ label: "Seller", conv: pickupChats[0], party: pickupChats[0].sellerName });
                       if (dropoffChats.length > 0) displayChats.push({ label: "Buyer", conv: dropoffChats[0], party: dropoffChats[0].buyerName });
 
+                      const firstItem = order.items?.[0] || {};
+                      const headerImg = firstItem.image || "";
+                      const headerTitle = firstItem.title || "Delivery Request";
+
                       return (
                         <div key={order._id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                          {/* DRIVER ORDER CARD HEADER WITH THUMBNAIL */}
                           <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-                            <div>
-                              <span className="font-black text-slate-900">{order.orderNumber}</span>
-                              <span className={`ml-3 text-[11px] font-bold px-2.5 py-1 rounded-full ${
-                                order.status === 'cancelled' ? 'bg-red-100 text-red-800' :
-                                order.dispatchStatus === 'pending' ? 'bg-amber-100 text-amber-800' : 
-                                order.dispatchStatus === 'active' ? 'bg-blue-100 text-blue-800' :
-                                'bg-emerald-100 text-emerald-800'
-                              }`}>
-                                {order.status === 'cancelled' ? '❌ Cancelled by Admin' :
-                                 order.dispatchStatus === 'pending' ? '⏳ Pending Dispatch' : 
-                                 order.dispatchStatus === 'active' ? '🚚 Active (In Transit)' :
-                                 '✅ Completed'}
-                              </span>
+                            <div className="flex items-center gap-3">
+                               {headerImg ? (
+                                  <img src={headerImg} alt="Thumbnail" className="w-12 h-12 rounded object-cover border" />
+                               ) : (
+                                  <div className="w-12 h-12 rounded bg-slate-100 border flex items-center justify-center text-xl">📦</div>
+                               )}
+                               <div>
+                                  <h3 className="font-black text-slate-900 leading-tight">{headerTitle}</h3>
+                                  <div className="flex items-center gap-2 mt-1">
+                                     <span className="text-xs font-semibold text-slate-500">{order.orderNumber}</span>
+                                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                        order.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                                        order.dispatchStatus === 'pending' ? 'bg-amber-100 text-amber-800' : 
+                                        order.dispatchStatus === 'active' ? 'bg-blue-100 text-blue-800' :
+                                        'bg-emerald-100 text-emerald-800'
+                                      }`}>
+                                        {order.status === 'cancelled' ? '❌ Cancelled' :
+                                         order.dispatchStatus === 'pending' ? '⏳ Pending Dispatch' : 
+                                         order.dispatchStatus === 'active' ? '🚚 Active (In Transit)' :
+                                         '✅ Completed'}
+                                      </span>
+                                  </div>
+                               </div>
                             </div>
-                            <p className="text-xs text-slate-500">Placed: {new Date(order.createdAt).toLocaleString()}</p>
+                            <p className="text-xs text-slate-500 hidden sm:block">Placed: {new Date(order.createdAt).toLocaleDateString()}</p>
                           </div>
                           
                           {(order.items || []).filter(i => i.deliveryMethod === 'delivery').map((item, idx) => (
@@ -880,22 +915,15 @@ export default function App() {
                                   {displayChats.map(chatInfo => {
                                     if (expandedChatConvId !== chatInfo.conv._id) return null;
                                     
-                                    const matchedItem = order.items.find(i => String(i.listingId) === String(chatInfo.conv.listingId)) || order.items[0];
-                                    const headerImg = matchedItem?.image || "";
-                                    
                                     return (
                                       <div key={`chat-${chatInfo.conv._id}`} className="mt-2 border border-slate-200 rounded-xl overflow-hidden bg-slate-50 flex flex-col h-[350px] animate-in fade-in slide-in-from-top-2">
+                                        
+                                        {/* DRIVER CHAT WINDOW HEADER (NO IMAGE HERE, JUST TEXT) */}
                                         <div className="bg-slate-900 text-white px-4 py-2.5 text-xs font-bold flex justify-between items-center shrink-0">
-                                          <div className="flex items-center gap-2.5">
-                                            {headerImg ? (
-                                              <img src={headerImg} alt="Item" className="w-7 h-7 rounded object-cover border border-slate-600 shadow-sm" />
-                                            ) : (
-                                              <span className="text-lg">📦</span>
-                                            )}
-                                            <span className="truncate max-w-[200px]">{String(chatInfo.conv.listingTitle || "Delivery Chat")}</span>
-                                          </div>
+                                          <span className="truncate max-w-[200px]">Message {chatInfo.label} ({chatInfo.party})</span>
                                           <button onClick={() => setExpandedChatConvId(null)} className="hover:text-red-400">✕ Close</button>
                                         </div>
+                                        
                                         <div className="flex-1 overflow-y-auto p-4 space-y-4">
                                           {(Array.isArray(chatInfo.conv.messages) ? chatInfo.conv.messages : []).map((m, mIdx) => {
                                             if (!m || typeof m !== 'object') return null;
@@ -1462,7 +1490,7 @@ export default function App() {
             </div>
           )}
 
-          {/* STANDARD USER MESSAGES TAB - NOW SAFELY INLINE WITH NO CRASHES */}
+          {/* BUYER/SELLER MESSAGES TAB - NOW SAFELY INLINE WITH NO CRASHES AND TRUE IMAGE */}
           {!isDriver && activeTab === "messages" && (
             <div className="max-w-5xl mx-auto space-y-6">
               <div>
@@ -1511,7 +1539,7 @@ export default function App() {
                           >
                             <div className="flex justify-between items-start text-xs font-bold text-slate-800">
                               <div className="flex-1">
-                                <span>{String(otherPersonName || "Unknown")}</span>
+                                <span>{otherPersonName || "Unknown"}</span>
                                 {isDispatch && <span className="ml-2 text-[9px] bg-blue-100 text-blue-800 border border-blue-200 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Dispatch</span>}
                                 <p className="text-xs text-slate-600 font-medium truncate mt-0.5">{String(sidebarTitle)}</p>
                               </div>
@@ -1584,6 +1612,9 @@ export default function App() {
                               if (!m || typeof m !== 'object') return null;
                               const msgId = m._id ? String(m._id) : `msg-${idx}`;
                               const senderName = String(m.sender || "Unknown");
+                              const msgText = String(m.text || "");
+                              const msgTime = String(m.time || "");
+                              
                               const isMe = senderName === String(currentUser?.name);
                               const isAdminMsg = senderName.includes("Admin") || senderName.includes("Dispatch");
                               
@@ -1598,13 +1629,13 @@ export default function App() {
                                       <button onClick={() => handleDeleteMessage(activeChat._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
                                     )}
                                     <div className={`px-4 py-2.5 rounded-xl text-sm max-w-[85%] whitespace-pre-wrap ${bubbleClass}`}>
-                                      {String(m.text || "")}
+                                      {msgText}
                                     </div>
                                     {!isMe && !isAdminMsg && m._id && (
                                       <button onClick={() => handleDeleteMessage(activeChat._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
                                     )}
                                   </div>
-                                  <span className="text-[10px] text-slate-400 mt-1 px-1">{senderName} • {String(m.time || "")}</span>
+                                  <span className="text-[10px] text-slate-400 mt-1 px-1">{senderName} • {msgTime}</span>
                                 </div>
                               );
                             })}
