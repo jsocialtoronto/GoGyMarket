@@ -15,7 +15,6 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [previewPhoto, setPreviewPhoto] = useState(null);
   
-  // NEW: Developer Settings Toggle State
   const [showDevSettings, setShowDevSettings] = useState(false);
 
   const [newRole, setNewRole] = useState("user");
@@ -26,10 +25,14 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
   const [newCity, setNewCity] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newConfirmPassword, setNewConfirmPassword] = useState("");
+  // NEW: Password Toggle for Create Account Form
+  const [showNewPassword, setShowNewPassword] = useState(false);
 
   const [resetTargetUser, setResetTargetUser] = useState(null);
   const [resetPassword, setResetPassword] = useState("");
   const [resetConfirmPassword, setResetConfirmPassword] = useState("");
+  // NEW: Password Toggle for Reset Form
+  const [showResetPassword, setShowResetPassword] = useState(false);
 
   const [feedback, setFeedback] = useState({ type: "", text: "" });
 
@@ -141,7 +144,7 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
           location: `${newAddress.trim()}, ${newCity.trim()}`
         })
       });
-      
+
       const contentType = res.headers.get("content-type");
       if (!contentType || !contentType.includes("application/json")) {
          throw new Error("Backend route not found. Please ensure Render has finished deploying.");
@@ -176,7 +179,7 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` }
       });
-      
+
       const contentType = res.headers.get("content-type");
       if (!contentType || !contentType.includes("application/json")) {
          throw new Error("Backend route not found. Please ensure Render has finished deploying.");
@@ -257,7 +260,7 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
       setFeedback({ type: "success", text: data.message });
       fetchAdminData();
       if (onOrdersUpdated) onOrdersUpdated();
-      setShowDevSettings(false); // Auto-hide the button after wiping
+      setShowDevSettings(false); 
     } catch (err) {
       setFeedback({ type: "error", text: err.message });
     }
@@ -303,7 +306,6 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* UPDATED: Hidden Developer Settings Toggle */}
           {isFullAdmin && (
             <div className="flex items-center gap-3 bg-slate-800 px-3 py-2 rounded-lg border border-slate-700 mr-2">
                <label className="flex items-center gap-2 text-xs font-bold text-slate-300 cursor-pointer hover:text-white">
@@ -614,13 +616,18 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Password *</label>
-                  <input type="password" required placeholder="Min 10 chars, 1 capital, letters & numbers" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+                  <input type={showNewPassword ? "text" : "password"} required placeholder="Min 10 chars, 1 capital, letters & numbers" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Confirm Password *</label>
-                  <input type="password" required placeholder="Re-type password" value={newConfirmPassword} onChange={(e) => setNewConfirmPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+                  <input type={showNewPassword ? "text" : "password"} required placeholder="Re-type password" value={newConfirmPassword} onChange={(e) => setNewConfirmPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
                 </div>
+                
+                <label className="flex items-center gap-2 cursor-pointer mt-1 mb-3">
+                  <input type="checkbox" checked={showNewPassword} onChange={(e) => setShowNewPassword(e.target.checked)} className="accent-emerald-600" />
+                  <span className="text-xs font-bold text-slate-600">Show Passwords</span>
+                </label>
 
                 <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm py-2.5 rounded-lg shadow-sm">
                   + Create {newRole === "admin" ? "Admin" : newRole === "viewer" ? "Viewer" : newRole === "driver" ? "Driver" : "Buyer/Seller"} Account
@@ -669,7 +676,7 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
                             {!isRestricted ? "🚫 Restrict Posting" : "✅ Allow Posting"}
                           </button>
                         )}
-                        <button onClick={() => { setResetTargetUser(u); setResetPassword(""); setResetConfirmPassword(""); }} className="text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg">
+                        <button onClick={() => { setResetTargetUser(u); setResetPassword(""); setResetConfirmPassword(""); setShowResetPassword(false); }} className="text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg">
                           🔑 Reset Password
                         </button>
                         {!isSelf && (
@@ -698,12 +705,17 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
               <p className="text-xs text-slate-500">Password must be at least 10 characters, include 1 capital letter, and contain a mix of letters and numbers.</p>
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-700 mb-1">New Password *</label>
-                <input type="password" required value={resetPassword} onChange={(e) => setResetPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+                <input type={showResetPassword ? "text" : "password"} required value={resetPassword} onChange={(e) => setResetPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
               </div>
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Confirm New Password *</label>
-                <input type="password" required value={resetConfirmPassword} onChange={(e) => setResetConfirmPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+                <input type={showResetPassword ? "text" : "password"} required value={resetConfirmPassword} onChange={(e) => setResetConfirmPassword(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
               </div>
+              <label className="flex items-center gap-2 cursor-pointer mt-1 mb-3">
+                <input type="checkbox" checked={showResetPassword} onChange={(e) => setShowResetPassword(e.target.checked)} className="accent-emerald-600" />
+                <span className="text-xs font-bold text-slate-600">Show Passwords</span>
+              </label>
+              
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={() => setResetTargetUser(null)} className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 rounded-lg">Cancel</button>
                 <button type="submit" className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg">Save New Password</button>
