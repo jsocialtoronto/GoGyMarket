@@ -256,7 +256,8 @@ function requireFullAdmin(req, res, next) {
 }
 
 async function sendOrderNotification({ listingId, listingTitle, buyerName, sellerName, text }) {
-  const formattedTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  // NEW: Guyana Timezone Fix
+  const formattedTime = new Date().toLocaleTimeString("en-US", { timeZone: "America/Guyana", hour: "2-digit", minute: "2-digit" });
   let conv = await Conversation.findOne({ listingId, buyerName, isDeliveryChat: false });
 
   if (!conv) {
@@ -820,7 +821,7 @@ app.get("/api/driver/orders", verifyStaff, async (req, res) => {
   }
 });
 
-// UPDATED: Driver Acceptance Messages
+// NEW: Guyana Timezone Fix for Driver Accepts
 app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can accept delivery requests." });
@@ -834,7 +835,7 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
     order.driverName = req.staffUser.name;
     await order.save();
 
-    const formattedTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const formattedTime = new Date().toLocaleTimeString("en-US", { timeZone: "America/Guyana", hour: "2-digit", minute: "2-digit" });
     
     await Conversation.create({
       listingId: String(order._id),
@@ -888,7 +889,7 @@ app.patch("/api/driver/orders/:id/cancel-assignment", verifyStaff, async (req, r
     order.driverName = null;
     await order.save();
 
-    const formattedTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const formattedTime = new Date().toLocaleTimeString("en-US", { timeZone: "America/Guyana", hour: "2-digit", minute: "2-digit" });
     const deliveryConvs = await Conversation.find({ orderId: String(order._id), isDeliveryChat: true });
     
     for (const c of deliveryConvs) {
@@ -919,7 +920,7 @@ app.patch("/api/driver/orders/:id/complete", verifyStaff, async (req, res) => {
     order.dispatchStatus = "completed";
     await order.save();
 
-    const formattedTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const formattedTime = new Date().toLocaleTimeString("en-US", { timeZone: "America/Guyana", hour: "2-digit", minute: "2-digit" });
     const deliveryConvs = await Conversation.find({ orderId: String(order._id), isDeliveryChat: true });
     
     for (const c of deliveryConvs) {
@@ -1044,11 +1045,12 @@ app.get("/api/conversations", async (req, res) => {
   }
 });
 
+// NEW: Guyana Timezone Fix for regular conversations
 app.post("/api/conversations", async (req, res) => {
   try {
     const { listingId, listingTitle, buyerName, sellerName, initialMessage } = req.body;
     let conv = await Conversation.findOne({ listingId, buyerName, isDeliveryChat: false });
-    const formattedTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const formattedTime = new Date().toLocaleTimeString("en-US", { timeZone: "America/Guyana", hour: "2-digit", minute: "2-digit" });
     const msgText = initialMessage || `Hi ${sellerName}, is "${listingTitle}" still available?`;
 
     if (!conv) {
@@ -1065,12 +1067,13 @@ app.post("/api/conversations", async (req, res) => {
   }
 });
 
+// NEW: Guyana Timezone Fix for direct messages
 app.post("/api/conversations/:id/messages", async (req, res) => {
   try {
     const { sender, text } = req.body;
     const conv = await Conversation.findById(req.params.id);
     if (!conv) return res.status(404).json({ error: "Conversation not found" });
-    conv.messages.push({ sender, text, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) });
+    conv.messages.push({ sender, text, time: new Date().toLocaleTimeString("en-US", { timeZone: "America/Guyana", hour: "2-digit", minute: "2-digit" }) });
     await conv.save();
     res.json(conv);
   } catch (err) {
