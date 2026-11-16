@@ -7,7 +7,7 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
   const isFullAdmin = currentUser?.role === "admin";
   const token = localStorage.getItem("gogy_token");
 
-  const [activeSubTab, setActiveSubTab] = useState("transactions"); // "transactions" | "analytics" | "users"
+  const [activeSubTab, setActiveSubTab] = useState("transactions"); 
   const [orders, setOrders] = useState([]);
   const [users, setUsers] = useState([]);
   const [stats, setStats] = useState(null);
@@ -15,7 +15,6 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [previewPhoto, setPreviewPhoto] = useState(null);
 
-  // Create Account State
   const [newRole, setNewRole] = useState("user");
   const [newAccountType, setNewAccountType] = useState("personal");
   const [newName, setNewName] = useState("");
@@ -217,7 +216,6 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
     }
   };
 
-  // NEW: Toggle user's ability to post listings
   const handleTogglePosting = async (userObj) => {
     if (!isFullAdmin) return;
     setFeedback({ type: "", text: "" });
@@ -232,6 +230,31 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
 
       setUsers((prev) => prev.map((u) => u._id === userObj._id ? { ...u, canPostListings: data.canPostListings } : u));
       setFeedback({ type: "success", text: data.message });
+    } catch (err) {
+      setFeedback({ type: "error", text: err.message });
+    }
+  };
+
+  // NEW: Emergency Nuke Database Handler
+  const handleEmergencyWipe = async () => {
+    if (!isFullAdmin) return;
+    const confirmed = window.confirm(
+      "🚨 CRITICAL WARNING: This will permanently delete EVERY listing in the database to clear out oversized image payloads causing the app to crash. This cannot be undone. Are you sure?"
+    );
+    if (!confirmed) return;
+
+    setFeedback({ type: "", text: "" });
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/emergency-clear-listings`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to wipe database");
+
+      setFeedback({ type: "success", text: data.message });
+      fetchAdminData();
+      if (onOrdersUpdated) onOrdersUpdated();
     } catch (err) {
       setFeedback({ type: "error", text: err.message });
     }
@@ -276,7 +299,17 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* NEW: Database Wipe Button */}
+          {isFullAdmin && (
+            <button
+              onClick={handleEmergencyWipe}
+              className="px-4 py-2 rounded-lg text-xs font-bold bg-red-600 hover:bg-red-500 text-white shadow-sm border border-red-700 mr-2"
+            >
+              🚨 Wipe All Listings (Fix Crash)
+            </button>
+          )}
+
           <button
             onClick={() => setActiveSubTab("transactions")}
             className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${activeSubTab === "transactions" ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}
