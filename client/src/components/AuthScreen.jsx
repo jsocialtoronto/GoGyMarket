@@ -6,20 +6,21 @@ const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:5000").repla
 export default function AuthScreen({ onAuthSuccess }) {
   const [isLogin, setIsLogin] = useState(true);
   
-  // Dynamic Form State
-  const [accountType, setAccountType] = useState("personal"); // 'personal' | 'business'
+  const [accountType, setAccountType] = useState("personal"); 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [businessName, setBusinessName] = useState("");
-  const [contactMethod, setContactMethod] = useState(""); // Email or Phone
+  const [contactMethod, setContactMethod] = useState(""); 
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   
-  // NEW: Address and City state
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("");
   
   const [isNotRobot, setIsNotRobot] = useState(false);
+  
+  // NEW: Password visibility toggle
+  const [showPassword, setShowPassword] = useState(false);
 
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -31,17 +32,14 @@ export default function AuthScreen({ onAuthSuccess }) {
       if (!businessName.trim()) return "Business Name is required.";
     }
 
-    // Ensure both Address and City are provided
     if (!address.trim() || !city.trim()) return "Both Address and City/Town are required.";
 
-    // Contact Validation (Email or Phone)
     const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactMethod);
     const isValidPhone = /^\+?[\d\s-]{10,}$/.test(contactMethod);
     if (!isValidEmail && !isValidPhone) {
       return "Please enter a valid email address or phone number (minimum 10 digits).";
     }
 
-    // Strict Password Validation
     if (password.length < 10) return "Password must be at least 10 characters long.";
     if (!/[A-Z]/.test(password)) return "Password must contain at least one uppercase letter.";
     if (!/[a-zA-Z]/.test(password) || !/\d/.test(password)) return "Password must contain a mix of letters and numbers.";
@@ -49,7 +47,7 @@ export default function AuthScreen({ onAuthSuccess }) {
     if (password !== confirmPassword) return "Passwords do not match.";
     if (!isNotRobot) return "Please verify that you are not a robot.";
 
-    return null; // Passes all checks
+    return null; 
   };
 
   const handleSubmit = async (e) => {
@@ -68,7 +66,6 @@ export default function AuthScreen({ onAuthSuccess }) {
 
     const endpoint = isLogin ? "/api/auth/login" : "/api/auth/register";
     
-    // Combine Address and City for the backend
     const payload = isLogin 
       ? { contactMethod, password }
       : { 
@@ -162,7 +159,6 @@ export default function AuthScreen({ onAuthSuccess }) {
             </div>
           )}
 
-          {/* NEW: Address and City split into two fields */}
           {!isLogin && (
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -191,7 +187,7 @@ export default function AuthScreen({ onAuthSuccess }) {
           <div>
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Password *</label>
             <input
-              type="password"
+              type={showPassword ? "text" : "password"}
               required
               placeholder="••••••••••"
               value={password}
@@ -205,7 +201,7 @@ export default function AuthScreen({ onAuthSuccess }) {
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Confirm Password *</label>
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 required
                 placeholder="••••••••••"
                 value={confirmPassword}
@@ -214,6 +210,16 @@ export default function AuthScreen({ onAuthSuccess }) {
               />
             </div>
           )}
+
+          <label className="flex items-center gap-2 cursor-pointer mt-2">
+            <input 
+              type="checkbox" 
+              checked={showPassword} 
+              onChange={(e) => setShowPassword(e.target.checked)} 
+              className="accent-emerald-600 w-4 h-4 rounded cursor-pointer" 
+            />
+            <span className="text-xs text-slate-600 font-semibold select-none">Show Password</span>
+          </label>
 
           {!isLogin && (
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mt-2 flex items-center gap-3">
