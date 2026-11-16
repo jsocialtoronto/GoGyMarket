@@ -17,7 +17,6 @@ app.use(
   })
 );
 
-// NEW: Global Cache-Busting Middleware (Forces Vercel/Render to always fetch fresh DB data)
 app.use((req, res, next) => {
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   res.setHeader("Pragma", "no-cache");
@@ -787,6 +786,16 @@ app.patch("/api/admin/users/:id/toggle-posting", verifyStaff, requireFullAdmin, 
   }
 });
 
+// NEW: Emergency WIPE ALL LISTINGS ROUTE to clear poisoned databases
+app.delete("/api/admin/emergency-clear-listings", verifyStaff, requireFullAdmin, async (req, res) => {
+  try {
+    await Listing.deleteMany({});
+    res.json({ message: "All listings successfully wiped. The database memory is clean." });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==========================================
 // 6. DRIVER API ROUTES
 // ==========================================
@@ -827,7 +836,6 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
 
     const formattedTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     
-    // Create Chat 1: Driver -> Buyer
     await Conversation.create({
       listingId: String(order._id),
       listingTitle: `Delivery Dropoff (Order ${order.orderNumber})`,
@@ -842,7 +850,6 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
       }]
     });
 
-    // Create Chat 2+: Driver -> Seller(s)
     const uniqueSellers = [...new Set(order.items.map(i => i.sellerName))];
     for (const sName of uniqueSellers) {
       await Conversation.create({
