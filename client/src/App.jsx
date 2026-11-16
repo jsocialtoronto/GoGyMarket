@@ -646,102 +646,123 @@ export default function App() {
   const myListings = (listings || []).filter((item) => String(item?.sellerId) === String(currentUser?.id));
   const favouriteListings = (listings || []).filter((item) => favouriteIds.includes(item?._id));
   
-  // RESTORED: Try/Catch safety block combined with strict optional chaining to prevent undefined ID reads.
+  // FIXED: Completely Rewritten renderMessagesTab. Uses strict defensive programming to prevent white screen crashes.
   const renderMessagesTab = () => {
-    try {
-      const validConvs = Array.isArray(conversations) ? conversations.filter(c => c && c._id) : [];
-      
-      if (validConvs.length === 0) {
-        return (
-          <div className="bg-white rounded-xl border border-slate-200 p-8 text-center min-h-[480px] flex items-center justify-center shadow-sm">
-            <div className="space-y-3">
-               <h3 className="font-bold text-slate-700 text-lg">No active conversations</h3>
-               <p className="text-slate-500 text-sm">Reach out to a seller to get started.</p>
-            </div>
-          </div>
-        );
-      }
+    // 1. Validate the primary conversations array
+    if (!conversations || !Array.isArray(conversations)) {
+      return <div className="p-8 text-center text-slate-500">Loading messages...</div>;
+    }
 
-      const activeConversation = validConvs.find((c) => String(c._id) === String(activeConvId)) || validConvs[0];
-      const validMessages = Array.isArray(activeConversation?.messages) ? activeConversation.messages : [];
-
+    // 2. Filter out corrupt documents
+    const safeConvs = conversations.filter(c => c && typeof c === "object" && c._id);
+    
+    if (safeConvs.length === 0) {
       return (
-        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden grid grid-cols-1 md:grid-cols-3 min-h-[480px]">
-          <div className="border-r border-slate-200 p-4 space-y-2 overflow-y-auto max-h-[480px]">
-            <h2 className="font-bold text-sm uppercase tracking-wider text-slate-500 mb-3">Conversations</h2>
-            {validConvs.map((conv) => {
-              const isMeSeller = String(conv.sellerName) === String(currentUser?.name);
-              const otherPersonName = isMeSeller ? String(conv.buyerName) : String(conv.sellerName);
-              const titleStr = String(conv.listingTitle || "Item Inquiry");
-              const isDispatch = Boolean(conv.isDeliveryChat);
-              // FIXED: Added optional chaining here to prevent crash if activeConversation is missing during re-render
-              const isSelected = String(activeConversation?._id) === String(conv._id);
+        <div className="bg-white rounded-xl border border-slate-200 p-12 text-center shadow-sm min-h-[400px] flex flex-col items-center justify-center">
+          <span className="text-4xl block mb-3">💬</span>
+          <h3 className="font-bold text-slate-900 text-lg">No Messages Yet</h3>
+          <p className="text-slate-500 text-sm mt-1">Reach out to a seller to start a conversation.</p>
+        </div>
+      );
+    }
+
+    // 3. Guarantee a valid active conversation
+    let activeConv = safeConvs.find(c => String(c._id) === String(activeConvId));
+    if (!activeConv) {
+      activeConv = safeConvs[0]; // Fallback if activeConvId is invalid or was just deleted
+    }
+
+    // 4. Guarantee a valid messages array
+    const safeMessages = Array.isArray(activeConv.messages) 
+      ? activeConv.messages.filter(m => m && typeof m === "object") 
+      : [];
+
+    return (
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden grid grid-cols-1 md:grid-cols-3 min-h-[480px]">
+        {/* SIDEBAR LIST */}
+        <div className="border-r border-slate-200 p-4 space-y-2 overflow-y-auto max-h-[480px]">
+          <h2 className="font-bold text-sm uppercase tracking-wider text-slate-500 mb-3">Conversations</h2>
+          {safeConvs.map(conv => {
+            const isMeSeller = String(conv.sellerName) === String(currentUser?.name);
+            const otherParty = isMeSeller ? (conv.buyerName || "Buyer") : (conv.sellerName || "Seller");
+            const titleStr = conv.listingTitle || "Item Inquiry";
+            const isSelected = String(activeConv._id) === String(conv._id);
+            const isDispatch = Boolean(conv.isDeliveryChat);
+
+            return (
+              <div 
+                key={String(conv._id)} 
+                onClick={() => setActiveConvId(conv._id)} 
+                className={`p-3 rounded-lg cursor-pointer border transition-colors ${isSelected ? "bg-emerald-50 border-emerald-300" : "border-slate-200 hover:bg-slate-50"}`}
+              >
+                <div className="flex justify-between items-start text-xs font-bold text-slate-800">
+                  <div className="flex-1">
+                    <span>{String(otherParty)}</span>
+                    {isDispatch && <span className="ml-2 text-[9px] bg-blue-100 text-blue-800 border border-blue-200 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Dispatch</span>}
+                    <p className="text-xs text-slate-600 font-medium truncate mt-0.5">{String(titleStr)}</p>
+                  </div>
+                  {/* Fixed: Stop propagation on delete to prevent crashing the active tab state */}
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleDeleteConversation(e, conv._id); }} 
+                    className="ml-2 text-slate-300 hover:text-red-500 transition-colors" 
+                    title="Delete Thread"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        
+        {/* ACTIVE CHAT WINDOW */}
+        <div className="md:col-span-2 flex flex-col justify-between p-4 bg-slate-50">
+          <div className="space-y-4 overflow-y-auto max-h-80 pr-2">
+            {safeMessages.map((m, idx) => {
+              const msgId = m._id ? String(m._id) : `msg-${idx}`;
+              const senderName = String(m.sender || "Unknown");
+              const msgText = String(m.text || "");
+              const msgTime = String(m.time || "");
+              
+              const isMe = senderName === String(currentUser?.name);
+              const isAdmin = senderName.includes("Admin") || senderName.includes("Dispatch");
+              
+              let bubbleClass = "bg-white border border-slate-200 text-slate-800";
+              if (isAdmin) bubbleClass = "bg-amber-50 border border-amber-300 text-amber-950 font-medium";
+              else if (isMe) bubbleClass = "bg-emerald-600 text-white";
 
               return (
-                <div 
-                  key={conv._id} 
-                  onClick={() => setActiveConvId(conv._id)} 
-                  className={`p-3 rounded-lg cursor-pointer border transition-colors ${isSelected ? "bg-emerald-50 border-emerald-300" : "border-slate-200 hover:bg-slate-50"}`}
-                >
-                  <div className="flex justify-between items-start text-xs font-bold text-slate-800">
-                    <div className="flex-1">
-                      <span>{otherPersonName || "Unknown User"}</span>
-                      {isDispatch && <span className="ml-2 text-[9px] bg-blue-100 text-blue-800 border border-blue-200 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Dispatch</span>}
-                      <p className="text-xs text-slate-600 font-medium truncate mt-0.5">{titleStr}</p>
+                <div key={msgId} className={`flex flex-col ${isAdmin ? "items-center" : isMe ? "items-end" : "items-start"}`}>
+                  <div className="flex items-center gap-2">
+                    {isMe && !isAdmin && m._id && (
+                      <button onClick={() => handleDeleteMessage(activeConv._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
+                    )}
+                    <div className={`px-4 py-2.5 rounded-xl text-sm max-w-md whitespace-pre-wrap shadow-sm ${bubbleClass}`}>
+                      {msgText}
                     </div>
-                    <button onClick={(e) => handleDeleteConversation(e, conv._id)} className="ml-2 text-slate-300 hover:text-red-500 transition-colors" title="Delete Thread">🗑️</button>
+                    {!isMe && !isAdmin && m._id && (
+                      <button onClick={() => handleDeleteMessage(activeConv._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
+                    )}
                   </div>
+                  <span className="text-[10px] text-slate-400 mt-1 px-1">{senderName} • {msgTime}</span>
                 </div>
               );
             })}
           </div>
-          
-          <div className="md:col-span-2 flex flex-col justify-between p-4 bg-slate-50">
-            <div className="space-y-4 overflow-y-auto max-h-80 pr-2">
-              {validMessages.map((m, idx) => {
-                if (!m) return null;
-                const msgId = m._id ? String(m._id) : `msg-${idx}`;
-                const isMe = String(m.sender) === String(currentUser?.name);
-                const isAdminMsg = String(m.sender).includes("Admin") || String(m.sender).includes("Dispatch");
-                
-                return (
-                  <div key={msgId} className={`flex flex-col ${isAdminMsg ? "items-center" : isMe ? "items-end" : "items-start"}`}>
-                    <div className="flex items-center gap-2">
-                      {isMe && !isAdminMsg && m._id && (
-                        <button onClick={() => handleDeleteMessage(activeConversation?._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
-                      )}
-                      <div className={`px-4 py-2.5 rounded-xl text-sm max-w-md whitespace-pre-wrap ${isAdminMsg ? "bg-amber-50 border border-amber-300 text-amber-950 font-medium" : isMe ? "bg-emerald-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
-                        {m.text ? String(m.text) : ""}
-                      </div>
-                      {!isMe && !isAdminMsg && m._id && (
-                        <button onClick={() => handleDeleteMessage(activeConversation?._id, m._id)} className="text-xs text-slate-300 hover:text-red-500 opacity-0 hover:opacity-100 transition-opacity" title="Delete Message">🗑️</button>
-                      )}
-                    </div>
-                    <span className="text-[10px] text-slate-400 mt-1 px-1">{m.sender ? String(m.sender) : "Unknown"} • {m.time ? String(m.time) : ""}</span>
-                  </div>
-                );
-              })}
-            </div>
-            {/* FIXED: Optional chaining used here as well */}
-            <form onSubmit={(e) => handleSendReply(e, activeConversation?._id)} className="mt-4 flex gap-2">
-              <input type="text" placeholder="Write a message..." value={replyText} onChange={(e) => setReplyText(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-emerald-500" />
-              <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors">Send</button>
-            </form>
-          </div>
+
+          <form onSubmit={(e) => handleSendReply(e, activeConv._id)} className="mt-4 flex gap-2">
+            <input 
+              type="text" 
+              placeholder="Write a message..." 
+              value={replyText} 
+              onChange={(e) => setReplyText(e.target.value)} 
+              className="flex-1 rounded-lg border border-slate-300 px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-emerald-500" 
+            />
+            <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors">Send</button>
+          </form>
         </div>
-      );
-    } catch (err) {
-      // Safely catches any unexpected evaluation errors and displays a clear retry button instead of a white screen
-      return (
-        <div className="bg-white rounded-xl border border-red-200 p-8 text-center min-h-[480px] flex items-center justify-center">
-          <div className="space-y-3">
-            <h3 className="text-red-600 font-bold">Failed to render messages screen.</h3>
-            <p className="text-slate-500 text-xs">{err.message}</p>
-            <button onClick={loadMarketplaceData} className="bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-lg mt-2">Retry Loading Data</button>
-          </div>
-        </div>
-      );
-    }
+      </div>
+    );
   };
 
   if (!currentUser) {
@@ -1456,7 +1477,7 @@ export default function App() {
                             const targetUserName = item.sellerName;
                             const raterRole = "buyer"; 
 
-                            const orderRating = (allRatings || []).find(
+                            const existingRating = (allRatings || []).find(
                               (r) => String(r.orderId) === String(order._id) && String(r.listingId) === String(item.listingId)
                             );
 
@@ -1477,18 +1498,18 @@ export default function App() {
                                   {!isPaidAndActive ? (
                                     <p className="text-xs text-amber-700 font-semibold italic">🔒 Rating available once payment is verified and transaction is Active.</p>
                                   ) : !isBuyer ? (
-                                    orderRating ? (
+                                    existingRating ? (
                                       <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg text-xs space-y-1">
-                                        <p className="font-bold text-blue-900">⭐ {orderRating.raterName} rated you: {orderRating.stars} / 5 Stars</p>
-                                        <p className="text-slate-700">"{orderRating.comment}"</p>
+                                        <p className="font-bold text-blue-900">⭐ {existingRating.raterName} rated you: {existingRating.stars} / 5 Stars</p>
+                                        <p className="text-slate-700">"{existingRating.comment}"</p>
                                       </div>
                                     ) : (
                                       <p className="text-xs text-slate-500 italic font-semibold">As the Seller, you must wait for the Buyer to leave a review for your service.</p>
                                     )
-                                  ) : orderRating ? (
+                                  ) : existingRating ? (
                                     <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-lg text-xs space-y-1">
-                                      <p className="font-bold text-emerald-900">⭐ You rated {targetUserName}: {orderRating.stars} / 5 Stars</p>
-                                      <p className="text-slate-700">"{orderRating.comment}"</p>
+                                      <p className="font-bold text-emerald-900">⭐ You rated {targetUserName}: {existingRating.stars} / 5 Stars</p>
+                                      <p className="text-slate-700">"{existingRating.comment}"</p>
                                     </div>
                                   ) : (
                                     <div className="space-y-2 bg-white p-3 rounded-lg border border-slate-200">
