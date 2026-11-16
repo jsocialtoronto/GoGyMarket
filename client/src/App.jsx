@@ -455,7 +455,7 @@ export default function App() {
   };
 
   const handleDeleteMessage = async (convId, msgId) => {
-    const conv = conversations.find(c => c._id === convId);
+    const conv = conversations.find(c => String(c._id) === String(convId));
     if (conv) {
       const hasActiveDelivery = myOrders.some(o => 
         o.items?.some(i => String(i.listingId) === String(conv.listingId)) &&
@@ -481,7 +481,7 @@ export default function App() {
 
   const handleDeleteConversation = async (e, convId) => {
     e.stopPropagation();
-    const conv = conversations.find(c => c._id === convId);
+    const conv = conversations.find(c => String(c._id) === String(convId));
     if (conv) {
       const hasActiveDelivery = myOrders.some(o => 
         o.items?.some(i => String(i.listingId) === String(conv.listingId)) &&
@@ -880,7 +880,6 @@ export default function App() {
                                   {displayChats.map(chatInfo => {
                                     if (expandedChatConvId !== chatInfo.conv._id) return null;
                                     
-                                    // Fetch item thumbnail from orders logic for drivers
                                     const matchedItem = order.items.find(i => String(i.listingId) === String(chatInfo.conv.listingId)) || order.items[0];
                                     const headerImg = matchedItem?.image || "";
                                     
@@ -899,7 +898,7 @@ export default function App() {
                                         </div>
                                         <div className="flex-1 overflow-y-auto p-4 space-y-4">
                                           {(Array.isArray(chatInfo.conv.messages) ? chatInfo.conv.messages : []).map((m, mIdx) => {
-                                            if (!m) return null;
+                                            if (!m || typeof m !== 'object') return null;
                                             const msgId = m._id ? String(m._id) : `msg-${mIdx}`;
                                             const senderName = String(m.sender || "Unknown");
                                             const isMe = senderName === String(currentUser?.name);
@@ -1463,7 +1462,7 @@ export default function App() {
             </div>
           )}
 
-          {/* FULLY RESTORED: Stable Messages Component (with Orders fallback image/title) */}
+          {/* STANDARD USER MESSAGES TAB - NOW SAFELY INLINE WITH NO CRASHES */}
           {!isDriver && activeTab === "messages" && (
             <div className="max-w-5xl mx-auto space-y-6">
               <div>
@@ -1472,12 +1471,13 @@ export default function App() {
               </div>
               
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden grid grid-cols-1 md:grid-cols-3 h-[500px]">
+                {/* 1. SIDEBAR */}
                 <div className="border-r border-slate-200 flex flex-col h-full bg-white">
                   <div className="p-4 border-b border-slate-100 shrink-0">
                     <h2 className="font-bold text-sm uppercase tracking-wider text-slate-500">Conversations</h2>
                   </div>
                   <div className="p-2 space-y-1 overflow-y-auto flex-1">
-                    {(!conversations || conversations.length === 0) ? (
+                    {!conversations || conversations.length === 0 ? (
                       <p className="text-xs text-slate-400 text-center mt-4">No messages yet.</p>
                     ) : (
                       conversations.map((conv) => {
@@ -1511,7 +1511,7 @@ export default function App() {
                           >
                             <div className="flex justify-between items-start text-xs font-bold text-slate-800">
                               <div className="flex-1">
-                                <span>{otherPersonName || "Unknown"}</span>
+                                <span>{String(otherPersonName || "Unknown")}</span>
                                 {isDispatch && <span className="ml-2 text-[9px] bg-blue-100 text-blue-800 border border-blue-200 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Dispatch</span>}
                                 <p className="text-xs text-slate-600 font-medium truncate mt-0.5">{String(sidebarTitle)}</p>
                               </div>
@@ -1530,6 +1530,7 @@ export default function App() {
                   </div>
                 </div>
                 
+                {/* 2. MAIN CHAT AREA */}
                 <div className="md:col-span-2 flex flex-col bg-slate-50 h-full relative">
                   {(conversations && conversations.length > 0) ? (
                     (() => {
@@ -1540,6 +1541,7 @@ export default function App() {
                       let headerImage = "";
                       let displayTitle = activeChat.listingTitle;
 
+                      // Use real actual image and title from matched orders or live listings
                       const matchedOrder = myOrders.find(o => o.items?.some(i => String(i.listingId) === String(activeChat.listingId)));
                       if (matchedOrder) {
                         const matchedItem = matchedOrder.items.find(i => String(i.listingId) === String(activeChat.listingId));
@@ -1551,7 +1553,7 @@ export default function App() {
                         const matchedListing = listings.find(l => String(l._id) === String(activeChat.listingId));
                         if (matchedListing) {
                           if (!headerImage && matchedListing.images?.[0]) headerImage = matchedListing.images[0];
-                          if (!displayTitle && matchedListing.title) displayTitle = matchedListing.title;
+                          if (matchedListing.title) displayTitle = matchedListing.title;
                         }
                       }
 
