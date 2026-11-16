@@ -786,7 +786,6 @@ app.patch("/api/admin/users/:id/toggle-posting", verifyStaff, requireFullAdmin, 
   }
 });
 
-// NEW: Emergency WIPE ALL LISTINGS ROUTE to clear poisoned databases
 app.delete("/api/admin/emergency-clear-listings", verifyStaff, requireFullAdmin, async (req, res) => {
   try {
     await Listing.deleteMany({});
@@ -821,6 +820,7 @@ app.get("/api/driver/orders", verifyStaff, async (req, res) => {
   }
 });
 
+// UPDATED: Driver Acceptance Messages
 app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can accept delivery requests." });
@@ -845,7 +845,7 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
       orderId: String(order._id),
       messages: [{ 
         sender: "GoGyMarket Dispatch", 
-        text: `Driver ${req.staffUser.name} has accepted the order.`, 
+        text: `Driver has accepted the order.`, 
         time: formattedTime 
       }]
     });
@@ -861,7 +861,7 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
         orderId: String(order._id),
         messages: [{ 
           sender: "GoGyMarket Dispatch", 
-          text: `Driver ${req.staffUser.name} has accepted the order.`, 
+          text: `Driver has accepted the order.`, 
           time: formattedTime 
         }]
       });
