@@ -454,7 +454,6 @@ export default function App() {
     }
   };
 
-  // ✅ ACTIVE ORDER DELETE PROTECTIONS
   const handleDeleteMessage = async (convId, msgId) => {
     const conv = conversations.find(c => c._id === convId);
     if (conv) {
@@ -673,6 +672,9 @@ export default function App() {
   const myListings = (listings || []).filter((item) => String(item?.sellerId) === String(currentUser?.id));
   const favouriteListings = (listings || []).filter((item) => favouriteIds.includes(item?._id));
 
+  // ==========================================
+  // RENDER UI
+  // ==========================================
   if (!currentUser) {
     return (
       <AuthScreen
@@ -849,7 +851,7 @@ export default function App() {
                                   </button>
                                   <button 
                                     onClick={() => handleCompleteDelivery(order._id)}
-                                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg shadow-sm border border-emerald-600 text-xs transition-colors"
+                                    className="flex-1 bg-emerald-600 hover:bg-emerald-50 text-white font-bold py-2.5 rounded-lg shadow-sm border border-emerald-600 text-xs transition-colors"
                                   >
                                     ✓ Complete Delivery
                                   </button>
@@ -877,24 +879,40 @@ export default function App() {
 
                                   {displayChats.map(chatInfo => {
                                     if (expandedChatConvId !== chatInfo.conv._id) return null;
+                                    
+                                    // Fetch item thumbnail for Driver UI
+                                    const matchedItem = order.items.find(i => String(i.listingId) === String(chatInfo.conv.listingId)) || order.items[0];
+                                    const headerImg = matchedItem?.image || "";
+                                    
                                     return (
                                       <div key={`chat-${chatInfo.conv._id}`} className="mt-2 border border-slate-200 rounded-xl overflow-hidden bg-slate-50 flex flex-col h-[350px] animate-in fade-in slide-in-from-top-2">
-                                        <div className="bg-slate-900 text-white px-4 py-2.5 text-xs font-bold flex justify-between items-center">
-                                          <span>{chatInfo.conv.listingTitle || "Delivery Chat"}</span>
+                                        
+                                        {/* DRIVER CHAT HEADER WITH THUMBNAIL */}
+                                        <div className="bg-slate-900 text-white px-4 py-2.5 text-xs font-bold flex justify-between items-center shrink-0">
+                                          <div className="flex items-center gap-2.5">
+                                            {headerImg ? (
+                                              <img src={headerImg} alt="Item" className="w-7 h-7 rounded object-cover border border-slate-600 shadow-sm" />
+                                            ) : (
+                                              <span className="text-lg">📦</span>
+                                            )}
+                                            <span className="truncate max-w-[200px]">{String(chatInfo.conv.listingTitle || "Delivery Chat")}</span>
+                                          </div>
                                           <button onClick={() => setExpandedChatConvId(null)} className="hover:text-red-400">✕ Close</button>
                                         </div>
+
                                         <div className="flex-1 overflow-y-auto p-4 space-y-4">
                                           {(Array.isArray(chatInfo.conv.messages) ? chatInfo.conv.messages : []).map((m, mIdx) => {
                                             if (!m) return null;
-                                            const msgId = m._id || `msg-${mIdx}`;
-                                            const isMe = String(m.sender) === String(currentUser?.name);
-                                            const isAdminMsg = String(m.sender).includes("Admin") || String(m.sender).includes("Dispatch");
+                                            const msgId = m._id ? String(m._id) : `msg-${mIdx}`;
+                                            const senderName = String(m.sender || "Unknown");
+                                            const isMe = senderName === String(currentUser?.name);
+                                            const isAdminMsg = senderName.includes("Admin") || senderName.includes("Dispatch");
                                             return (
                                               <div key={msgId} className={`flex flex-col ${isAdminMsg ? "items-center" : isMe ? "items-end" : "items-start"}`}>
-                                                <div className={`px-4 py-2.5 rounded-xl text-sm max-w-[85%] whitespace-pre-wrap ${isAdminMsg ? "bg-amber-50 border border-amber-300 text-amber-950 font-medium" : isMe ? "bg-emerald-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
-                                                  {m.text || ""}
+                                                <div className={`px-4 py-2.5 rounded-xl text-sm max-w-[85%] whitespace-pre-wrap ${isAdminMsg ? "bg-amber-50 border border-amber-300 text-amber-950 font-medium" : isMe ? "bg-emerald-600 text-white" : "bg-white border border-slate-200 text-slate-800 shadow-sm"}`}>
+                                                  {String(m.text || "")}
                                                 </div>
-                                                <span className="text-[10px] text-slate-400 mt-1 px-1">{m.sender || "Unknown"} • {m.time || ""}</span>
+                                                <span className="text-[10px] text-slate-400 mt-1 px-1">{senderName} • {String(m.time || "")}</span>
                                               </div>
                                             );
                                           })}
@@ -910,7 +928,7 @@ export default function App() {
                                             setConversations(prev => prev.map(c => c._id === chatInfo.conv._id ? updatedConv : c));
                                             setDriverReplyText("");
                                           });
-                                        }} className="p-3 bg-white border-t border-slate-200 flex gap-2">
+                                        }} className="p-3 bg-white border-t border-slate-200 flex gap-2 shrink-0">
                                           <input type="text" placeholder="Type a message..." value={driverReplyText} onChange={(e) => setDriverReplyText(e.target.value)} className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-emerald-500" />
                                           <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors">Send</button>
                                         </form>
@@ -1448,7 +1466,7 @@ export default function App() {
             </div>
           )}
 
-          {/* INLINE MESSAGES UI REVERTED TO AVOID STALE CLOSURE CRASHES */}
+          {/* MESSAGES TAB INLINE WITH THUMBNAIL HEADER */}
           {!isDriver && activeTab === "messages" && (
             <div className="max-w-5xl mx-auto space-y-6">
               <div>
@@ -1456,50 +1474,57 @@ export default function App() {
                 <p className="text-xs text-slate-500">Communicate directly with buyers and sellers.</p>
               </div>
               
-              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden grid grid-cols-1 md:grid-cols-3 min-h-[500px]">
-                <div className="border-r border-slate-200 p-4 space-y-2 overflow-y-auto max-h-[500px]">
-                  {conversations.length === 0 ? (
-                    <p className="text-xs text-slate-400 text-center mt-4">No messages yet.</p>
-                  ) : (
-                    conversations.map((conv) => {
-                      if (!conv) return null;
-                      const isMeSeller = conv.sellerName === currentUser?.name;
-                      const otherPersonName = isMeSeller ? conv.buyerName : conv.sellerName;
-                      
-                      let currentActiveId = activeConvId;
-                      if (!currentActiveId && conversations.length > 0) {
-                        currentActiveId = conversations[0]?._id;
-                      }
-                      
-                      const isSelected = currentActiveId === conv._id;
+              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden grid grid-cols-1 md:grid-cols-3 h-[500px]">
+                {/* 1. SIDEBAR */}
+                <div className="border-r border-slate-200 flex flex-col h-full bg-white">
+                  <div className="p-4 border-b border-slate-100 shrink-0">
+                    <h2 className="font-bold text-sm uppercase tracking-wider text-slate-500">Conversations</h2>
+                  </div>
+                  <div className="p-2 space-y-1 overflow-y-auto flex-1">
+                    {conversations.length === 0 ? (
+                      <p className="text-xs text-slate-400 text-center mt-4">No messages yet.</p>
+                    ) : (
+                      conversations.map((conv) => {
+                        if (!conv) return null;
+                        const isMeSeller = conv.sellerName === currentUser?.name;
+                        const otherPersonName = isMeSeller ? conv.buyerName : conv.sellerName;
+                        
+                        let currentActiveId = activeConvId;
+                        if (!currentActiveId && conversations.length > 0) {
+                          currentActiveId = conversations[0]?._id;
+                        }
+                        
+                        const isSelected = currentActiveId === conv._id;
 
-                      return (
-                        <div 
-                          key={conv._id} 
-                          onClick={() => setActiveConvId(conv._id)} 
-                          className={`p-3 rounded-lg cursor-pointer border transition-colors ${isSelected ? "bg-emerald-50 border-emerald-300" : "border-slate-200 hover:bg-slate-50"}`}
-                        >
-                          <div className="flex justify-between items-start text-xs font-bold text-slate-800">
-                            <div className="flex-1">
-                              <span>{otherPersonName || "Unknown"}</span>
-                              {conv.isDeliveryChat && <span className="ml-2 text-[9px] bg-blue-100 text-blue-800 border border-blue-200 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Dispatch</span>}
-                              <p className="text-xs text-slate-600 font-medium truncate mt-0.5">{conv.listingTitle || "Item Inquiry"}</p>
+                        return (
+                          <div 
+                            key={conv._id} 
+                            onClick={() => setActiveConvId(conv._id)} 
+                            className={`p-3 rounded-lg cursor-pointer border transition-colors ${isSelected ? "bg-emerald-50 border-emerald-300" : "border-slate-200 hover:bg-slate-50"}`}
+                          >
+                            <div className="flex justify-between items-start text-xs font-bold text-slate-800">
+                              <div className="flex-1">
+                                <span>{otherPersonName || "Unknown"}</span>
+                                {conv.isDeliveryChat && <span className="ml-2 text-[9px] bg-blue-100 text-blue-800 border border-blue-200 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Dispatch</span>}
+                                <p className="text-xs text-slate-600 font-medium truncate mt-0.5">{conv.listingTitle || "Item Inquiry"}</p>
+                              </div>
+                              <button 
+                                onClick={(e) => handleDeleteConversation(e, conv._id)} 
+                                className="ml-2 text-slate-300 hover:text-red-500 transition-colors" 
+                                title="Delete Thread"
+                              >
+                                🗑️
+                              </button>
                             </div>
-                            <button 
-                              onClick={(e) => handleDeleteConversation(e, conv._id)} 
-                              className="ml-2 text-slate-300 hover:text-red-500 transition-colors" 
-                              title="Delete Thread"
-                            >
-                              🗑️
-                            </button>
                           </div>
-                        </div>
-                      );
-                    })
-                  )}
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
                 
-                <div className="md:col-span-2 flex flex-col justify-between p-4 bg-slate-50 relative">
+                {/* 2. MAIN CHAT AREA */}
+                <div className="md:col-span-2 flex flex-col bg-slate-50 h-full relative">
                   {conversations.length > 0 ? (
                     (() => {
                       let activeChat = conversations.find((c) => c._id === activeConvId);
@@ -1507,9 +1532,43 @@ export default function App() {
 
                       if (!activeChat) return null;
 
+                      // Match the item thumbnail
+                      const matchedListing = listings.find(l => String(l._id) === String(activeChat.listingId));
+                      let headerImage = matchedListing?.images?.[0] || "";
+                      
+                      // Fallback: If listing was deleted, try matching from historical orders
+                      if (!headerImage) {
+                         for (const o of myOrders) {
+                           const itemMatch = o.items.find(i => String(i.listingId) === String(activeChat.listingId));
+                           if (itemMatch && itemMatch.image) {
+                             headerImage = itemMatch.image;
+                             break;
+                           }
+                         }
+                      }
+
+                      const isMeSellerActive = String(activeChat.sellerName) === String(currentUser?.name);
+                      const activeOtherParty = isMeSellerActive ? (activeChat.buyerName || "Buyer") : (activeChat.sellerName || "Seller");
+
                       return (
                         <>
-                          <div className="space-y-4 overflow-y-auto max-h-[400px] pr-2">
+                          {/* Chat Header with Thumbnail */}
+                          <div className="bg-white border-b border-slate-200 p-3 flex items-center justify-between shrink-0 shadow-sm z-10">
+                            <div className="flex items-center gap-3">
+                              {headerImage ? (
+                                <img src={headerImage} alt="Thumbnail" className="w-10 h-10 rounded-lg object-cover border border-slate-200 shadow-sm" />
+                              ) : (
+                                <div className="w-10 h-10 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-xl">📦</div>
+                              )}
+                              <div>
+                                <h3 className="font-black text-slate-900 text-sm line-clamp-1">{String(activeChat.listingTitle || "Item Inquiry")}</h3>
+                                <p className="text-[11px] text-slate-500 font-semibold mt-0.5">Chatting with: <span className="font-bold text-slate-700">{String(activeOtherParty)}</span></p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Chat Messages */}
+                          <div className="flex-1 overflow-y-auto p-4 space-y-4 pr-2">
                             {(activeChat.messages || []).map((m, idx) => {
                               if (!m) return null;
                               const msgId = m._id || `msg-${idx}`;
@@ -1534,15 +1593,17 @@ export default function App() {
                               );
                             })}
                           </div>
-                          <form onSubmit={(e) => handleSendReply(e, activeChat._id)} className="mt-4 flex gap-2">
+
+                          {/* Chat Input */}
+                          <form onSubmit={(e) => handleSendReply(e, activeChat._id)} className="p-3 bg-white border-t border-slate-200 shrink-0 flex gap-2">
                             <input 
                               type="text" 
                               placeholder="Write a message..." 
                               value={replyText} 
                               onChange={(e) => setReplyText(e.target.value)} 
-                              className="flex-1 rounded-lg border border-slate-300 px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-emerald-500" 
+                              className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-emerald-500" 
                             />
-                            <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors">Send</button>
+                            <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors">Send</button>
                           </form>
                         </>
                       );
