@@ -11,7 +11,7 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
     subcategory: initialSubcategory || MARKETPLACE_CATEGORIES[initialCategory || Object.keys(MARKETPLACE_CATEGORIES)[0]][0],
     pricingType: "fixed",
     price: "",
-    condition: "New", // NEW
+    condition: "New",
     stockCount: 1,
     location: currentUser?.location || "Toronto, ON",
     isLocationMasked: true,
@@ -32,21 +32,56 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
     });
   };
 
-  const handleImageUpload = (e) => {
-    const files = Array.from(e.target.files);
-    Promise.all(files.map(file => {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (ev) => resolve(ev.target.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-    })).then(base64Images => {
-      setImages(prev => [...prev, ...base64Images].slice(0, 5));
-      if (base64Images.length > 0) setError(""); 
-    }).catch(err => {
-      setError("Failed to read image file.");
+  // NEW: Heavy-duty image compressor to prevent the database from crashing on fetch
+  const compressImage = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target.result;
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          const MAX_WIDTH = 800;
+          const MAX_HEIGHT = 800;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, width, height);
+          
+          // Compress to JPEG at 70% quality to ensure tiny payloads
+          resolve(canvas.toDataURL("image/jpeg", 0.7));
+        };
+        img.onerror = (err) => reject(err);
+      };
+      reader.onerror = (err) => reject(err);
     });
+  };
+
+  const handleImageUpload = async (e) => {
+    const files = Array.from(e.target.files);
+    try {
+      const compressedImages = await Promise.all(files.map(file => compressImage(file)));
+      setImages(prev => [...prev, ...compressedImages].slice(0, 5));
+      if (compressedImages.length > 0) setError(""); 
+    } catch (err) {
+      setError("Failed to process and compress image file.");
+    }
   };
 
   const removeImage = (indexToRemove) => {
@@ -73,7 +108,7 @@ export default function PostListingForm({ currentUser, initialCategory = "", ini
         subcategory: formData.subcategory,
         pricingType: formData.pricingType,
         price: Number(formData.price || 0),
-        condition: formData.condition, // Added payload mapping
+        condition: formData.condition, 
         stockCount: Math.max(1, Number(formData.stockCount || 1)),
         location: formData.location.trim(),
         isLocationMasked: formData.isLocationMasked,
