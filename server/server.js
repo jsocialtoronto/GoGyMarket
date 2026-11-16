@@ -256,7 +256,6 @@ function requireFullAdmin(req, res, next) {
 }
 
 async function sendOrderNotification({ listingId, listingTitle, buyerName, sellerName, text }) {
-  // NEW: Guyana Timezone Fix
   const formattedTime = new Date().toLocaleTimeString("en-US", { timeZone: "America/Guyana", hour: "2-digit", minute: "2-digit" });
   let conv = await Conversation.findOne({ listingId, buyerName, isDeliveryChat: false });
 
@@ -420,9 +419,7 @@ app.post("/api/orders", async (req, res) => {
       const itemTotal = item.unitPrice * item.quantity;
       let msg = "";
       
-      if (paymentMethod === "credit") {
-        continue; 
-      }
+      if (paymentMethod === "credit") continue; 
 
       if (paymentMethod === "pickup") {
         msg = `🧾 ORDER ${orderNumber} (Option 1: Local Pickup)\nItem: ${item.quantity}x ${item.title}\nItem Total: $${itemTotal.toLocaleString()} GYD\n\nBuyer ${buyerName} selected Local Pickup. Please coordinate pickup time and payment directly in this chat.`;
@@ -490,16 +487,12 @@ app.post("/api/create-checkout-session", async (req, res) => {
 app.post("/api/orders/confirm-stripe", async (req, res) => {
   try {
     const { sessionId, orderId } = req.body;
-    
-    if (!process.env.STRIPE_SECRET_KEY) {
-       return res.status(500).json({ error: "Stripe key missing."});
-    }
+    if (!process.env.STRIPE_SECRET_KEY) return res.status(500).json({ error: "Stripe key missing."});
 
     const session = await stripe.checkout.sessions.retrieve(sessionId);
 
     if (session.payment_status === 'paid') {
       const order = await Order.findById(orderId);
-      
       if (order && order.status === "pending_payment") {
         order.status = "active";
         await order.save();
@@ -553,13 +546,8 @@ app.post("/api/ratings", async (req, res) => {
     const order = await Order.findById(orderId);
     if (!order) return res.status(404).json({ error: "Order not found." });
 
-    if (order.status !== "active") {
-      return res.status(400).json({ error: "Ratings can only be submitted after payment has been verified." });
-    }
-
-    if (String(order.buyerId) !== String(raterId)) {
-      return res.status(400).json({ error: "Only the Buyer can leave a rating for this transaction." });
-    }
+    if (order.status !== "active") return res.status(400).json({ error: "Ratings can only be submitted after payment has been verified." });
+    if (String(order.buyerId) !== String(raterId)) return res.status(400).json({ error: "Only the Buyer can leave a rating for this transaction." });
 
     const existingRating = await Rating.findOne({ orderId, listingId, raterId });
     if (existingRating) return res.status(400).json({ error: "You have already rated the seller for this item." });
@@ -821,7 +809,7 @@ app.get("/api/driver/orders", verifyStaff, async (req, res) => {
   }
 });
 
-// NEW: Guyana Timezone Fix for Driver Accepts
+// UPDATE: Strictly enforces updating existing dual chats instead of duplicating them!
 app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can accept delivery requests." });
@@ -837,35 +825,43 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
 
     const formattedTime = new Date().toLocaleTimeString("en-US", { timeZone: "America/Guyana", hour: "2-digit", minute: "2-digit" });
     
-    await Conversation.create({
-      listingId: String(order._id),
-      listingTitle: `Delivery Dropoff (Order ${order.orderNumber})`,
-      buyerName: order.buyerName, 
-      sellerName: req.staffUser.name, 
-      isDeliveryChat: true,
-      orderId: String(order._id),
-      messages: [{ 
-        sender: "GoGyMarket Dispatch", 
-        text: `Driver has accepted the order.`, 
-        time: formattedTime 
-      }]
-    });
-
-    const uniqueSellers = [...new Set(order.items.map(i => i.sellerName))];
-    for (const sName of uniqueSellers) {
+    // 1. Check if Dropoff Chat (Driver <-> Buyer) exists. Update or Create 1.
+    let dropoffConv = await Conversation.findOne({ orderId: String(order._id), isDeliveryChat: true, buyerName: order.buyerName });
+    if (!dropoffConv) {
       await Conversation.create({
         listingId: String(order._id),
-        listingTitle: `Delivery Pickup (Order ${order.orderNumber})`,
-        buyerName: req.staffUser.name, 
-        sellerName: sName,
+        listingTitle: `Delivery Dropoff (Order ${order.orderNumber})`,
+        buyerName: order.buyerName, 
+        sellerName: req.staffUser.name, 
         isDeliveryChat: true,
         orderId: String(order._id),
-        messages: [{ 
-          sender: "GoGyMarket Dispatch", 
-          text: `Driver has accepted the order.`, 
-          time: formattedTime 
-        }]
+        messages: [{ sender: "GoGyMarket Dispatch", text: `Driver has accepted the order.`, time: formattedTime }]
       });
+    } else {
+      dropoffConv.sellerName = req.staffUser.name;
+      dropoffConv.messages.push({ sender: "GoGyMarket Dispatch", text: `Driver has accepted the order.`, time: formattedTime });
+      await dropoffConv.save();
+    }
+
+    // 2. Check if Pickup Chats (Driver <-> Sellers) exist. Update or Create 1.
+    const uniqueSellers = [...new Set(order.items.map(i => i.sellerName))];
+    for (const sName of uniqueSellers) {
+      let pickupConv = await Conversation.findOne({ orderId: String(order._id), isDeliveryChat: true, sellerName: sName });
+      if (!pickupConv) {
+        await Conversation.create({
+          listingId: String(order._id),
+          listingTitle: `Delivery Pickup from ${sName} (Order ${order.orderNumber})`,
+          buyerName: req.staffUser.name, 
+          sellerName: sName,
+          isDeliveryChat: true,
+          orderId: String(order._id),
+          messages: [{ sender: "GoGyMarket Dispatch", text: `Driver has accepted the order.`, time: formattedTime }]
+        });
+      } else {
+        pickupConv.buyerName = req.staffUser.name;
+        pickupConv.messages.push({ sender: "GoGyMarket Dispatch", text: `Driver has accepted the order.`, time: formattedTime });
+        await pickupConv.save();
+      }
     }
 
     res.json(order);
@@ -1045,7 +1041,6 @@ app.get("/api/conversations", async (req, res) => {
   }
 });
 
-// NEW: Guyana Timezone Fix for regular conversations
 app.post("/api/conversations", async (req, res) => {
   try {
     const { listingId, listingTitle, buyerName, sellerName, initialMessage } = req.body;
@@ -1067,7 +1062,6 @@ app.post("/api/conversations", async (req, res) => {
   }
 });
 
-// NEW: Guyana Timezone Fix for direct messages
 app.post("/api/conversations/:id/messages", async (req, res) => {
   try {
     const { sender, text } = req.body;
