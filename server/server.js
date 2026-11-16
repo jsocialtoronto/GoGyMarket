@@ -419,7 +419,9 @@ app.post("/api/orders", async (req, res) => {
       const itemTotal = item.unitPrice * item.quantity;
       let msg = "";
       
-      if (paymentMethod === "credit") continue; 
+      if (paymentMethod === "credit") {
+        continue; 
+      }
 
       if (paymentMethod === "pickup") {
         msg = `🧾 ORDER ${orderNumber} (Option 1: Local Pickup)\nItem: ${item.quantity}x ${item.title}\nItem Total: $${itemTotal.toLocaleString()} GYD\n\nBuyer ${buyerName} selected Local Pickup. Please coordinate pickup time and payment directly in this chat.`;
@@ -487,12 +489,16 @@ app.post("/api/create-checkout-session", async (req, res) => {
 app.post("/api/orders/confirm-stripe", async (req, res) => {
   try {
     const { sessionId, orderId } = req.body;
-    if (!process.env.STRIPE_SECRET_KEY) return res.status(500).json({ error: "Stripe key missing."});
+    
+    if (!process.env.STRIPE_SECRET_KEY) {
+       return res.status(500).json({ error: "Stripe key missing."});
+    }
 
     const session = await stripe.checkout.sessions.retrieve(sessionId);
 
     if (session.payment_status === 'paid') {
       const order = await Order.findById(orderId);
+      
       if (order && order.status === "pending_payment") {
         order.status = "active";
         await order.save();
@@ -546,8 +552,13 @@ app.post("/api/ratings", async (req, res) => {
     const order = await Order.findById(orderId);
     if (!order) return res.status(404).json({ error: "Order not found." });
 
-    if (order.status !== "active") return res.status(400).json({ error: "Ratings can only be submitted after payment has been verified." });
-    if (String(order.buyerId) !== String(raterId)) return res.status(400).json({ error: "Only the Buyer can leave a rating for this transaction." });
+    if (order.status !== "active") {
+      return res.status(400).json({ error: "Ratings can only be submitted after payment has been verified." });
+    }
+
+    if (String(order.buyerId) !== String(raterId)) {
+      return res.status(400).json({ error: "Only the Buyer can leave a rating for this transaction." });
+    }
 
     const existingRating = await Rating.findOne({ orderId, listingId, raterId });
     if (existingRating) return res.status(400).json({ error: "You have already rated the seller for this item." });
@@ -809,7 +820,7 @@ app.get("/api/driver/orders", verifyStaff, async (req, res) => {
   }
 });
 
-// UPDATE: Strictly enforces updating existing dual chats instead of duplicating them!
+// FIXED: Driver Acceptance Logic (Stops Duplicate Chats & Spammed Messages)
 app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can accept delivery requests." });
@@ -824,9 +835,10 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
     await order.save();
 
     const formattedTime = new Date().toLocaleTimeString("en-US", { timeZone: "America/Guyana", hour: "2-digit", minute: "2-digit" });
+    const acceptMsg = "Driver has accepted the order.";
     
-    // 1. Check if Dropoff Chat (Driver <-> Buyer) exists. Update or Create 1.
-    let dropoffConv = await Conversation.findOne({ orderId: String(order._id), isDeliveryChat: true, buyerName: order.buyerName });
+    // 1. Check if Dropoff Chat (Driver <-> Buyer) exists.
+    let dropoffConv = await Conversation.findOne({ orderId: String(order._id), isDeliveryChat: true, listingTitle: { $regex: /Dropoff/i } });
     if (!dropoffConv) {
       await Conversation.create({
         listingId: String(order._id),
@@ -835,31 +847,37 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
         sellerName: req.staffUser.name, 
         isDeliveryChat: true,
         orderId: String(order._id),
-        messages: [{ sender: "GoGyMarket Dispatch", text: `Driver has accepted the order.`, time: formattedTime }]
+        messages: [{ sender: "GoGyMarket Dispatch", text: acceptMsg, time: formattedTime }]
       });
     } else {
       dropoffConv.sellerName = req.staffUser.name;
-      dropoffConv.messages.push({ sender: "GoGyMarket Dispatch", text: `Driver has accepted the order.`, time: formattedTime });
+      const lastMsg = dropoffConv.messages[dropoffConv.messages.length - 1];
+      if (!lastMsg || lastMsg.text !== acceptMsg) {
+        dropoffConv.messages.push({ sender: "GoGyMarket Dispatch", text: acceptMsg, time: formattedTime });
+      }
       await dropoffConv.save();
     }
 
-    // 2. Check if Pickup Chats (Driver <-> Sellers) exist. Update or Create 1.
+    // 2. Check if Pickup Chats (Driver <-> Sellers) exist.
     const uniqueSellers = [...new Set(order.items.map(i => i.sellerName))];
     for (const sName of uniqueSellers) {
-      let pickupConv = await Conversation.findOne({ orderId: String(order._id), isDeliveryChat: true, sellerName: sName });
+      let pickupConv = await Conversation.findOne({ orderId: String(order._id), isDeliveryChat: true, listingTitle: { $regex: /Pickup/i }, sellerName: sName });
       if (!pickupConv) {
         await Conversation.create({
           listingId: String(order._id),
-          listingTitle: `Delivery Pickup from ${sName} (Order ${order.orderNumber})`,
+          listingTitle: `Delivery Pickup (Order ${order.orderNumber})`,
           buyerName: req.staffUser.name, 
           sellerName: sName,
           isDeliveryChat: true,
           orderId: String(order._id),
-          messages: [{ sender: "GoGyMarket Dispatch", text: `Driver has accepted the order.`, time: formattedTime }]
+          messages: [{ sender: "GoGyMarket Dispatch", text: acceptMsg, time: formattedTime }]
         });
       } else {
         pickupConv.buyerName = req.staffUser.name;
-        pickupConv.messages.push({ sender: "GoGyMarket Dispatch", text: `Driver has accepted the order.`, time: formattedTime });
+        const lastMsg = pickupConv.messages[pickupConv.messages.length - 1];
+        if (!lastMsg || lastMsg.text !== acceptMsg) {
+          pickupConv.messages.push({ sender: "GoGyMarket Dispatch", text: acceptMsg, time: formattedTime });
+        }
         await pickupConv.save();
       }
     }
@@ -886,15 +904,15 @@ app.patch("/api/driver/orders/:id/cancel-assignment", verifyStaff, async (req, r
     await order.save();
 
     const formattedTime = new Date().toLocaleTimeString("en-US", { timeZone: "America/Guyana", hour: "2-digit", minute: "2-digit" });
-    const deliveryConvs = await Conversation.find({ orderId: String(order._id), isDeliveryChat: true });
+    const cancelMsg = `⚠️ Driver ${req.staffUser.name} has cancelled their assignment. This request is now pending a new driver.`;
     
+    const deliveryConvs = await Conversation.find({ orderId: String(order._id), isDeliveryChat: true });
     for (const c of deliveryConvs) {
-      c.messages.push({
-        sender: "GoGyMarket Dispatch",
-        text: `⚠️ Driver ${req.staffUser.name} has cancelled their assignment. This request is now pending a new driver.`,
-        time: formattedTime
-      });
-      await c.save();
+      const lastMsg = c.messages[c.messages.length - 1];
+      if (!lastMsg || lastMsg.text !== cancelMsg) {
+        c.messages.push({ sender: "GoGyMarket Dispatch", text: cancelMsg, time: formattedTime });
+        await c.save();
+      }
     }
 
     res.json(order);
@@ -917,15 +935,15 @@ app.patch("/api/driver/orders/:id/complete", verifyStaff, async (req, res) => {
     await order.save();
 
     const formattedTime = new Date().toLocaleTimeString("en-US", { timeZone: "America/Guyana", hour: "2-digit", minute: "2-digit" });
-    const deliveryConvs = await Conversation.find({ orderId: String(order._id), isDeliveryChat: true });
+    const compMsg = `🏁 DELIVERY COMPLETED: ${req.staffUser.name} has marked this delivery as successfully dropped off!`;
     
+    const deliveryConvs = await Conversation.find({ orderId: String(order._id), isDeliveryChat: true });
     for (const c of deliveryConvs) {
-      c.messages.push({
-        sender: "GoGyMarket Dispatch",
-        text: `🏁 DELIVERY COMPLETED: ${req.staffUser.name} has marked this delivery as successfully dropped off!`,
-        time: formattedTime
-      });
-      await c.save();
+      const lastMsg = c.messages[c.messages.length - 1];
+      if (!lastMsg || lastMsg.text !== compMsg) {
+        c.messages.push({ sender: "GoGyMarket Dispatch", text: compMsg, time: formattedTime });
+        await c.save();
+      }
     }
     
     res.json(order);
