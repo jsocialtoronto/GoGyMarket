@@ -15,7 +15,8 @@ export default function PortalLayout({
   let navItems = [];
 
   if (isDriver) {
-    // UPDATED: Messages tab removed for drivers (handled inline in requests)
+    // FIXED: The "Messages" tab has been completely deleted for Drivers. 
+    // They will only see the "Driver Portal" tab and handle chats inline.
     navItems = [
       { id: "driver", label: "Driver Portal", icon: "🚚", badge: null }
     ];
