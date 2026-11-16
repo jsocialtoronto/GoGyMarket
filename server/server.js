@@ -17,6 +17,14 @@ app.use(
   })
 );
 
+// NEW: Global Cache-Busting Middleware (Forces Vercel/Render to always fetch fresh DB data)
+app.use((req, res, next) => {
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  next();
+});
+
 app.use(express.json({ limit: "15mb" }));
 
 const JWT_SECRET = process.env.JWT_SECRET || "gogy_super_secret_dev_key_2026";
@@ -804,7 +812,6 @@ app.get("/api/driver/orders", verifyStaff, async (req, res) => {
   }
 });
 
-// NEW: Dual-Chat Creation on Driver Acceptance
 app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can accept delivery requests." });
@@ -830,7 +837,7 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
       orderId: String(order._id),
       messages: [{ 
         sender: "GoGyMarket Dispatch", 
-        text: `Driver ${req.staffUser.name} has accepted your delivery and is on the way! You can message them directly in this thread.`, 
+        text: `Driver ${req.staffUser.name} has accepted the order.`, 
         time: formattedTime 
       }]
     });
@@ -847,7 +854,7 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
         orderId: String(order._id),
         messages: [{ 
           sender: "GoGyMarket Dispatch", 
-          text: `Driver ${req.staffUser.name} is on the way to pick up an order! You can message them directly in this thread.`, 
+          text: `Driver ${req.staffUser.name} has accepted the order.`, 
           time: formattedTime 
         }]
       });
@@ -859,7 +866,6 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
   }
 });
 
-// NEW: Driver Cancel Assignment (Updates all dual-chats)
 app.patch("/api/driver/orders/:id/cancel-assignment", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can cancel their assignment." });
@@ -893,7 +899,6 @@ app.patch("/api/driver/orders/:id/cancel-assignment", verifyStaff, async (req, r
   }
 });
 
-// NEW: Driver Complete Delivery (Updates all dual-chats)
 app.patch("/api/driver/orders/:id/complete", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can complete delivery requests." });
