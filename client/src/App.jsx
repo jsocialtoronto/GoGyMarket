@@ -646,7 +646,6 @@ export default function App() {
   const myListings = (listings || []).filter((item) => String(item?.sellerId) === String(currentUser?.id));
   const favouriteListings = (listings || []).filter((item) => favouriteIds.includes(item?._id));
   
-  // FIXED: Bulletproof Buyer/Seller Messages Component
   const renderMessagesTab = () => {
     const validConvs = Array.isArray(conversations) ? conversations.filter(c => c && c._id) : [];
     
@@ -825,7 +824,6 @@ export default function App() {
                 return (
                   <div className="space-y-4">
                     {filteredForTab.map((order) => {
-                      // FIXED: Extracts ONLY ONE unique Dropoff chat and ONE unique Pickup chat for the driver.
                       const orderConvsRaw = (Array.isArray(conversations) ? conversations : []).filter(c => c && c.orderId === order._id && c.isDeliveryChat);
                       const dropoffChats = orderConvsRaw.filter(c => String(c.listingTitle || "").includes("Dropoff"));
                       const pickupChats = orderConvsRaw.filter(c => String(c.listingTitle || "").includes("Pickup"));
@@ -1442,8 +1440,9 @@ export default function App() {
                             const targetUserName = item.sellerName;
                             const raterRole = "buyer"; 
 
-                            const existingRating = (allRatings || []).find(
-                              (r) => String(r.orderId) === String(order._id) && String(r.listingId) === String(item.listingId) && String(r.raterId) === String(currentUser.id)
+                            // Finds the rating submitted by the buyer for THIS specific item/order
+                            const orderRating = (allRatings || []).find(
+                              (r) => String(r.orderId) === String(order._id) && String(r.listingId) === String(item.listingId)
                             );
 
                             return (
@@ -1463,11 +1462,18 @@ export default function App() {
                                   {!isPaidAndActive ? (
                                     <p className="text-xs text-amber-700 font-semibold italic">🔒 Rating available once payment is verified and transaction is Active.</p>
                                   ) : !isBuyer ? (
-                                    <p className="text-xs text-slate-500 italic font-semibold">As the Seller, you must wait for the Buyer to leave a review for your service.</p>
-                                  ) : existingRating ? (
+                                    orderRating ? (
+                                      <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg text-xs space-y-1">
+                                        <p className="font-bold text-blue-900">⭐ {orderRating.raterName} rated you: {orderRating.stars} / 5 Stars</p>
+                                        <p className="text-slate-700">"{orderRating.comment}"</p>
+                                      </div>
+                                    ) : (
+                                      <p className="text-xs text-slate-500 italic font-semibold">As the Seller, you must wait for the Buyer to leave a review for your service.</p>
+                                    )
+                                  ) : orderRating ? (
                                     <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-lg text-xs space-y-1">
-                                      <p className="font-bold text-emerald-900">⭐ You rated {targetUserName}: {existingRating.stars} / 5 Stars</p>
-                                      <p className="text-slate-700">"{existingRating.comment}"</p>
+                                      <p className="font-bold text-emerald-900">⭐ You rated {targetUserName}: {orderRating.stars} / 5 Stars</p>
+                                      <p className="text-slate-700">"{orderRating.comment}"</p>
                                     </div>
                                   ) : (
                                     <div className="space-y-2 bg-white p-3 rounded-lg border border-slate-200">
@@ -1497,9 +1503,6 @@ export default function App() {
               )}
             </div>
           )}
-
-          {/* STANDARD USER MESSAGES TAB */}
-          {!isDriver && activeTab === "messages" && renderMessagesTab()}
 
           {activeTab === "post" && (
             <PostListingForm
