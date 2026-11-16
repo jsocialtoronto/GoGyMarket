@@ -82,16 +82,17 @@ export default function App() {
       setIsLoading(true);
       const timestamp = Date.now();
       
+      // NEW: Added explicit cache: "no-store" to bypass browser AND CDN caching!
       const [listingsRes, convsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/listings?t=${timestamp}`),
-        fetch(`${API_BASE}/api/conversations?t=${timestamp}`)
+        fetch(`${API_BASE}/api/listings?t=${timestamp}`, { cache: "no-store" }),
+        fetch(`${API_BASE}/api/conversations?t=${timestamp}`, { cache: "no-store" })
       ]);
 
       if (listingsRes.ok) {
         const listingsData = await listingsRes.json();
         setListings(Array.isArray(listingsData) ? listingsData : []);
       } else {
-        console.error("Server refused listing fetch. Likely due to payload size limit from giant photos.");
+        console.error("Server refused listing fetch. This usually means a caching timeout or payload limit.");
       }
 
       if (convsRes.ok) {
@@ -104,8 +105,8 @@ export default function App() {
 
       if (currentUser && !isStaff && !isDriver) {
         const [ordersRes, ratingsRes] = await Promise.all([
-          fetch(`${API_BASE}/api/orders/user/${currentUser.id}?t=${timestamp}`),
-          fetch(`${API_BASE}/api/ratings?t=${timestamp}`)
+          fetch(`${API_BASE}/api/orders/user/${currentUser.id}?t=${timestamp}`, { cache: "no-store" }),
+          fetch(`${API_BASE}/api/ratings?t=${timestamp}`, { cache: "no-store" })
         ]);
         if (ordersRes.ok) {
           const oData = await ordersRes.json();
@@ -129,9 +130,10 @@ export default function App() {
       const timestamp = Date.now();
       const [ordersRes, convsRes] = await Promise.all([
         fetch(`${API_BASE}/api/driver/orders?t=${timestamp}`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem("gogy_token")}` }
+          headers: { Authorization: `Bearer ${localStorage.getItem("gogy_token")}` },
+          cache: "no-store"
         }),
-        fetch(`${API_BASE}/api/conversations?t=${timestamp}`)
+        fetch(`${API_BASE}/api/conversations?t=${timestamp}`, { cache: "no-store" })
       ]);
 
       if (ordersRes.ok) {
@@ -592,7 +594,7 @@ export default function App() {
       return matchesKeyword && matchesCat && matchesSub && matchesMinPrice && matchesMaxPrice && matchesLocation;
     });
 
-    return result.slice(0, 10);
+    return result.slice(0, 50); 
   }, [listings, searchQuery, selectedCat, selectedSubcat, minPrice, maxPrice, locationFilter, currentUser, showOwnListings]);
 
   useEffect(() => {
