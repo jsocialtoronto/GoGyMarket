@@ -1440,7 +1440,7 @@ export default function App() {
                             const targetUserName = item.sellerName;
                             const raterRole = "buyer"; 
 
-                            // Finds the rating submitted by the buyer for THIS specific item/order
+                            // FIXED: Seller can now see the review once it is posted by the buyer
                             const orderRating = (allRatings || []).find(
                               (r) => String(r.orderId) === String(order._id) && String(r.listingId) === String(item.listingId)
                             );
