@@ -17,7 +17,6 @@ app.use(
   })
 );
 
-// Global Cache-Busting Middleware to prevent stale requests
 app.use((req, res, next) => {
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   res.setHeader("Pragma", "no-cache");
@@ -53,7 +52,8 @@ const userSchema = new mongoose.Schema(
     location: { type: String, required: true, default: "Toronto, ON" },
     averageRating: { type: Number, default: 0 },
     ratingCount: { type: Number, default: 0 },
-    canPostListings: { type: Boolean, default: true }
+    canPostListings: { type: Boolean, default: true },
+    credits: { type: Number, default: 0 } // NEW: Account Credits Balance
   },
   { timestamps: true }
 );
@@ -130,7 +130,7 @@ const orderSchema = new mongoose.Schema(
     buyerContact: { type: String },
     paymentMethod: {
       type: String,
-      enum: ["pickup", "cash", "etransfer", "credit"],
+      enum: ["pickup", "cash", "etransfer", "credit", "store_credit"],
       required: true
     },
     paymentOptionLabel: { type: String, required: true },
@@ -177,6 +177,8 @@ const orderSchema = new mongoose.Schema(
     itemSubtotal: { type: Number, required: true, default: 0 },
     deliveryTotal: { type: Number, required: true, default: 0 },
     grandTotal: { type: Number, required: true, default: 0 },
+    creditsApplied: { type: Number, default: 0 }, // NEW: Track applied credits
+    balanceDue: { type: Number, default: 0 },     // NEW: Track remaining balance after credits
     lockboxPhoto: { type: String, default: null },
     verifiedBy: { type: String, default: null },
     verifiedAt: { type: Date, default: null }
@@ -316,7 +318,8 @@ app.post("/api/auth/register", async (req, res) => {
       phone,
       password: hashedPassword,
       location: location || "Toronto, ON",
-      canPostListings: true
+      canPostListings: true,
+      credits: 0
     });
 
     const token = jwt.sign({ id: newUser._id, role: newUser.role }, JWT_SECRET, { expiresIn: "7d" });
@@ -324,7 +327,7 @@ app.post("/api/auth/register", async (req, res) => {
     res.status(201).json({
       token,
       user: {
-        id: newUser._id, name: newUser.name, email: newUser.email, phone: newUser.phone, location: newUser.location, role: newUser.role, canPostListings: newUser.canPostListings
+        id: newUser._id, name: newUser.name, email: newUser.email, phone: newUser.phone, location: newUser.location, role: newUser.role, canPostListings: newUser.canPostListings, credits: newUser.credits
       }
     });
   } catch (err) {
@@ -348,11 +351,41 @@ app.post("/api/auth/login", async (req, res) => {
     res.json({
       token,
       user: {
-        id: user._id, name: user.name, email: user.email, phone: user.phone, location: user.location, role: user.role || "user", canPostListings: user.canPostListings !== false
+        id: user._id, name: user.name, email: user.email, phone: user.phone, location: user.location, role: user.role || "user", canPostListings: user.canPostListings !== false, credits: user.credits || 0
       }
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Fetch current user details (used to refresh credits)
+app.get("/api/users/:id", async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).select("-password");
+    if (!user) return res.status(404).json({ error: "User not found" });
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Self-Service Password Reset
+app.patch("/api/users/:id/password", async (req, res) => {
+  try {
+    const { newPassword } = req.body;
+    const pwError = validateStrictPassword(newPassword);
+    if (pwError) return res.status(400).json({ error: pwError });
+    
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+    
+    const updatedUser = await User.findByIdAndUpdate(req.params.id, { password: hashedPassword }, { new: true }).select("-password");
+    if (!updatedUser) return res.status(404).json({ error: "User not found." });
+    
+    res.json({ message: "Password updated successfully!" });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -368,11 +401,32 @@ app.post("/api/orders", async (req, res) => {
 
     if (!items || items.length === 0) return res.status(400).json({ error: "Cart cannot be empty." });
 
+    // DEDUCT ACCOUNT CREDITS AUTOMATICALLY
+    const buyer = await User.findById(buyerId);
+    let appliedCredits = 0;
+    let finalBalanceDue = Number(grandTotal || 0);
+
+    if (buyer && buyer.credits > 0) {
+      appliedCredits = Math.min(buyer.credits, finalBalanceDue);
+      buyer.credits -= appliedCredits;
+      finalBalanceDue -= appliedCredits;
+      await buyer.save();
+    }
+
     let initialStatus = "active";
-    if (paymentMethod === "etransfer") initialStatus = "waiting_etransfer";
-    else if (paymentMethod === "cash") initialStatus = "waiting_cash";
-    else if (paymentMethod === "pickup") initialStatus = "pickup_pending";
-    else if (paymentMethod === "credit") initialStatus = "pending_payment";
+    let finalPaymentLabel = paymentOptionLabel;
+    let finalPaymentMethod = paymentMethod;
+
+    if (finalBalanceDue <= 0) {
+      initialStatus = "active";
+      finalPaymentLabel = "Paid in Full with Account Credits";
+      finalPaymentMethod = "store_credit";
+    } else {
+      if (paymentMethod === "etransfer") initialStatus = "waiting_etransfer";
+      else if (paymentMethod === "cash") initialStatus = "waiting_cash";
+      else if (paymentMethod === "pickup") initialStatus = "pickup_pending";
+      else if (paymentMethod === "credit") initialStatus = "pending_payment";
+    }
 
     const orderNumber = "ORD-" + Math.floor(100000 + Math.random() * 900000);
     let requiresDriver = false;
@@ -411,25 +465,34 @@ app.post("/api/orders", async (req, res) => {
     }));
 
     const newOrder = await Order.create({
-      orderNumber, buyerId, buyerName, buyerContact, paymentMethod, paymentOptionLabel, status: initialStatus,
+      orderNumber, buyerId, buyerName, buyerContact, 
+      paymentMethod: finalPaymentMethod, 
+      paymentOptionLabel: finalPaymentLabel, 
+      status: initialStatus,
       dispatchStatus: requiresDriver ? "pending" : "N/A",
-      items: formattedItems, itemSubtotal: Number(itemSubtotal || 0), deliveryTotal: Number(deliveryTotal || 0), grandTotal: Number(grandTotal || 0), lockboxPhoto: lockboxPhoto || null
+      items: formattedItems, 
+      itemSubtotal: Number(itemSubtotal || 0), 
+      deliveryTotal: Number(deliveryTotal || 0), 
+      grandTotal: Number(grandTotal || 0), 
+      creditsApplied: appliedCredits,
+      balanceDue: finalBalanceDue,
+      lockboxPhoto: lockboxPhoto || null
     });
 
     for (const item of formattedItems) {
       const itemTotal = item.unitPrice * item.quantity;
       let msg = "";
       
-      if (paymentMethod === "credit") {
-        continue; 
-      }
+      if (finalPaymentMethod === "credit") continue; 
 
-      if (paymentMethod === "pickup") {
-        msg = `🧾 ORDER ${orderNumber} (Option 1: Local Pickup)\nItem: ${item.quantity}x ${item.title}\nItem Total: $${itemTotal.toLocaleString()} GYD\n\nBuyer ${buyerName} selected Local Pickup. Please coordinate pickup time and payment directly in this chat.`;
-      } else if (paymentMethod === "etransfer") {
-        msg = `⏳ ORDER ${orderNumber} PENDING ADMIN VERIFICATION (eTransfer to gogymarket.com)\nItem: ${item.quantity}x ${item.title}\nTotal Due: $${(itemTotal + item.shippingCost).toLocaleString()} GYD\n\nOnce GoGyMarket Admin verifies the eTransfer, the seller will be notified that the item is ready for pickup.`;
-      } else if (paymentMethod === "cash") {
-        msg = `⏳ ORDER ${orderNumber} PENDING ADMIN CASH CONFIRMATION (Lockbox Photo Uploaded)\nItem: ${item.quantity}x ${item.title}\nTotal Due: $${(itemTotal + item.shippingCost).toLocaleString()} GYD\n\nOnce GoGyMarket Admin confirms the cash lockbox photo, the seller will be notified that the item is ready for pickup.`;
+      if (finalPaymentMethod === "store_credit") {
+        msg = `✅ ORDER ${orderNumber} ACTIVE & PAID (Store Credit)\nItem: ${item.quantity}x ${item.title}\nItem Total: $${itemTotal.toLocaleString()} GYD\n\nPayment is fully covered by account credits! Seller ${item.sellerName}, please prepare this item.`;
+      } else if (finalPaymentMethod === "pickup") {
+        msg = `🧾 ORDER ${orderNumber} (Option 1: Local Pickup)\nItem: ${item.quantity}x ${item.title}\nBalance Due: $${finalBalanceDue.toLocaleString()} GYD\n\nBuyer ${buyerName} selected Local Pickup. Please coordinate pickup time and payment directly in this chat.`;
+      } else if (finalPaymentMethod === "etransfer") {
+        msg = `⏳ ORDER ${orderNumber} PENDING ADMIN VERIFICATION (eTransfer to gogymarket.com)\nItem: ${item.quantity}x ${item.title}\nBalance Due: $${finalBalanceDue.toLocaleString()} GYD\n\nOnce GoGyMarket Admin verifies the eTransfer, the seller will be notified that the item is ready for pickup.`;
+      } else if (finalPaymentMethod === "cash") {
+        msg = `⏳ ORDER ${orderNumber} PENDING ADMIN CASH CONFIRMATION (Lockbox Photo Uploaded)\nItem: ${item.quantity}x ${item.title}\nBalance Due: $${finalBalanceDue.toLocaleString()} GYD\n\nOnce GoGyMarket Admin confirms the cash lockbox photo, the seller will be notified that the item is ready for pickup.`;
       }
 
       if (msg) {
@@ -447,30 +510,44 @@ app.post("/api/orders", async (req, res) => {
 
 app.post("/api/create-checkout-session", async (req, res) => {
   try {
-    const { orderId, items, deliveryTotal, domain } = req.body;
+    const { orderId, items, deliveryTotal, creditsApplied, balanceDue, domain } = req.body;
 
     if (!process.env.STRIPE_SECRET_KEY) {
       return res.status(500).json({ error: "Stripe key is not configured on the server." });
     }
 
-    const lineItems = items.map(item => ({
-      price_data: {
-        currency: 'cad', 
-        product_data: { name: item.title },
-        unit_amount: Math.round((item.price || item.unitPrice) * 100), 
-      },
-      quantity: item.quantity || 1,
-    }));
+    let lineItems = [];
 
-    if (deliveryTotal > 0) {
-      lineItems.push({
+    // If credits were used but a balance remains, send a single custom line item so Stripe handles the math cleanly
+    if (creditsApplied > 0 && balanceDue > 0) {
+      lineItems = [{
         price_data: {
           currency: 'cad',
-          product_data: { name: "Delivery Fee" },
-          unit_amount: Math.round(deliveryTotal * 100),
+          product_data: { name: "Order Balance (After Store Credits Applied)" },
+          unit_amount: Math.round(balanceDue * 100),
         },
         quantity: 1,
-      });
+      }];
+    } else {
+      lineItems = items.map(item => ({
+        price_data: {
+          currency: 'cad', 
+          product_data: { name: item.title },
+          unit_amount: Math.round((item.price || item.unitPrice) * 100), 
+        },
+        quantity: item.quantity || 1,
+      }));
+
+      if (deliveryTotal > 0) {
+        lineItems.push({
+          price_data: {
+            currency: 'cad',
+            product_data: { name: "Delivery Fee" },
+            unit_amount: Math.round(deliveryTotal * 100),
+          },
+          quantity: 1,
+        });
+      }
     }
 
     const session = await stripe.checkout.sessions.create({
@@ -490,24 +567,18 @@ app.post("/api/create-checkout-session", async (req, res) => {
 app.post("/api/orders/confirm-stripe", async (req, res) => {
   try {
     const { sessionId, orderId } = req.body;
-    
-    if (!process.env.STRIPE_SECRET_KEY) {
-       return res.status(500).json({ error: "Stripe key missing."});
-    }
+    if (!process.env.STRIPE_SECRET_KEY) return res.status(500).json({ error: "Stripe key missing."});
 
     const session = await stripe.checkout.sessions.retrieve(sessionId);
 
     if (session.payment_status === 'paid') {
       const order = await Order.findById(orderId);
-      
       if (order && order.status === "pending_payment") {
         order.status = "active";
         await order.save();
 
         for (const item of order.items) {
-          const itemTotal = item.unitPrice * item.quantity;
-          const msg = `✅ ORDER ${order.orderNumber} ACTIVE & PAID (Credit Card)\nItem: ${item.quantity}x ${item.title}\nItem Total: $${itemTotal.toLocaleString()} GYD\nDelivery Fee: $${item.shippingCost.toLocaleString()} GYD\n\nPayment is complete! Seller ${item.sellerName}, please prepare this item for delivery pickup.`;
-          
+          const msg = `✅ ORDER ${order.orderNumber} ACTIVE & PAID (Credit Card)\nItem: ${item.quantity}x ${item.title}\n\nPayment is complete! Seller ${item.sellerName}, please prepare this item.`;
           await sendOrderNotification({
             listingId: item.listingId, listingTitle: item.title, buyerName: order.buyerName, sellerName: item.sellerName, text: msg
           });
@@ -742,6 +813,22 @@ app.post("/api/admin/users", verifyStaff, requireFullAdmin, async (req, res) => 
   }
 });
 
+// ADMIN: ADD ACCOUNT CREDITS
+app.patch("/api/admin/users/:id/credits", verifyStaff, requireFullAdmin, async (req, res) => {
+  try {
+    const { amount } = req.body;
+    const user = await User.findById(req.params.id).select("-password");
+    if (!user) return res.status(404).json({ error: "User not found." });
+    
+    user.credits = (user.credits || 0) + Number(amount);
+    await user.save();
+    
+    res.json({ message: `Successfully added $${Number(amount).toLocaleString()} GYD credits to ${user.name}.`, user });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.delete("/api/admin/users/:id", verifyStaff, requireFullAdmin, async (req, res) => {
   try {
     if (String(req.staffUser._id) === String(req.params.id)) return res.status(400).json({ error: "You cannot delete your own active Admin account." });
@@ -837,7 +924,6 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
     const formattedTime = new Date().toLocaleTimeString("en-US", { timeZone: "America/Guyana", hour: "2-digit", minute: "2-digit" });
     const acceptMsg = "Driver has accepted the order.";
     
-    // Create or update Driver -> Buyer (Dropoff) Chat
     let dropoffConv = await Conversation.findOne({ orderId: String(order._id), isDeliveryChat: true, listingTitle: { $regex: /Dropoff/i } });
     if (!dropoffConv) {
       await Conversation.create({
@@ -858,7 +944,6 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
       await dropoffConv.save();
     }
 
-    // Create or update Driver -> Seller (Pickup) Chat
     const uniqueSellers = [...new Set(order.items.map(i => i.sellerName))];
     for (const sName of uniqueSellers) {
       let pickupConv = await Conversation.findOne({ orderId: String(order._id), isDeliveryChat: true, listingTitle: { $regex: /Pickup/i }, sellerName: sName });
