@@ -9,8 +9,6 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
 
-mongoose.set('bufferCommands', false);
-
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 let twilioClient = null;
@@ -153,6 +151,7 @@ const orderSchema = new mongoose.Schema(
     creditsApplied: { type: Number, default: 0 }, 
     balanceDue: { type: Number, default: 0 },     
     lockboxPhoto: { type: String, default: null },
+    hasLockboxPhoto: { type: Boolean, default: false },
     verifiedBy: { type: String, default: null },
     verifiedAt: { type: Date, default: null }
   },
@@ -203,7 +202,7 @@ async function verifyStaff(req, res, next) {
     }
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await User.findById(decoded.id);
+    const user = await User.findById(decoded.id).lean();
 
     if (!user || !["admin", "viewer", "driver"].includes(user.role)) {
       return res.status(403).json({ error: "Forbidden: Staff/Driver access required" });
@@ -238,26 +237,23 @@ async function sendOrderNotification({ listingId, listingTitle, buyerName, selle
   return conv;
 }
 
-app.use('/api', (req, res, next) => {
-  if (mongoose.connection.readyState === 0) {
-    return res.status(503).json({ error: "DATABASE_DISCONNECTED: The server has lost connection to MongoDB Atlas. Please check Render environment variables." });
-  }
-  next();
-});
-
 app.get("/", (req, res) => res.send("GoGyMarket API is live."));
 app.get("/api/health", (req, res) => { res.json({ status: "ok", dbConnected: mongoose.connection.readyState === 1 }); });
+
+// ==========================================
+// 3. AUTH & USER ROUTES
+// ==========================================
 
 app.post("/api/auth/send-otp", async (req, res) => {
   try {
     const { phone, email } = req.body;
     if (!phone) return res.status(400).json({ error: "Phone number is required for verification." });
 
-    const existingPhone = await User.findOne({ phone: phone.trim() });
+    const existingPhone = await User.findOne({ phone: phone.trim() }).lean();
     if (existingPhone) return res.status(400).json({ error: "This phone number is already registered to an active account." });
 
     if (email) {
-      const existingEmail = await User.findOne({ email: email.toLowerCase().trim() });
+      const existingEmail = await User.findOne({ email: email.toLowerCase().trim() }).lean();
       if (existingEmail) return res.status(400).json({ error: "This email address is already registered." });
     }
 
@@ -288,7 +284,7 @@ app.post("/api/auth/register", async (req, res) => {
       return res.status(400).json({ error: "Invalid or expired verification code." });
     }
 
-    const existingPhone = await User.findOne({ phone: verificationPhone.trim() });
+    const existingPhone = await User.findOne({ phone: verificationPhone.trim() }).lean();
     if (existingPhone) return res.status(400).json({ error: "Registration Denied: This phone number is already registered." });
 
     const isEmail = contactMethod.includes("@");
@@ -319,7 +315,7 @@ app.post("/api/auth/login", async (req, res) => {
     const { contactMethod, password } = req.body;
     const isEmail = contactMethod.includes("@");
     const query = isEmail ? { email: contactMethod.toLowerCase().trim() } : { phone: contactMethod.trim() };
-    const user = await User.findOne(query);
+    const user = await User.findOne(query).lean();
 
     if (!user) return res.status(400).json({ error: "Invalid login credentials." });
     const isMatch = await bcrypt.compare(password, user.password);
@@ -337,7 +333,7 @@ app.post("/api/auth/login", async (req, res) => {
 
 app.get("/api/users/:id", async (req, res) => {
   try {
-    const user = await User.findById(req.params.id).select("-password");
+    const user = await User.findById(req.params.id).select("-password").lean();
     if (!user) return res.status(404).json({ error: "User not found" });
     res.json(user);
   } catch (err) {
@@ -354,7 +350,7 @@ app.patch("/api/users/:id/password", async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
     
-    const updatedUser = await User.findByIdAndUpdate(req.params.id, { password: hashedPassword }, { new: true }).select("-password");
+    const updatedUser = await User.findByIdAndUpdate(req.params.id, { password: hashedPassword }, { new: true }).select("-password").lean();
     if (!updatedUser) return res.status(404).json({ error: "User not found." });
     
     res.json({ message: "Password updated successfully!" });
@@ -362,6 +358,10 @@ app.patch("/api/users/:id/password", async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
+
+// ==========================================
+// 4. ORDER, RATING, CHECKOUT & STRIPE ROUTES
+// ==========================================
 
 app.post("/api/orders", async (req, res) => {
   try {
@@ -424,7 +424,9 @@ app.post("/api/orders", async (req, res) => {
       orderNumber, buyerId, buyerName, buyerContact, paymentMethod: finalPaymentMethod, paymentOptionLabel: finalPaymentLabel, 
       status: initialStatus, dispatchStatus: requiresDriver ? "pending" : "N/A", items: formattedItems, 
       itemSubtotal: Number(itemSubtotal || 0), deliveryTotal: Number(deliveryTotal || 0), grandTotal: Number(grandTotal || 0), 
-      creditsApplied: appliedCredits, balanceDue: finalBalanceDue, lockboxPhoto: lockboxPhoto || null
+      creditsApplied: appliedCredits, balanceDue: finalBalanceDue, 
+      lockboxPhoto: lockboxPhoto || null,
+      hasLockboxPhoto: Boolean(lockboxPhoto)
     });
 
     for (const item of formattedItems) {
@@ -500,10 +502,14 @@ app.post("/api/orders/confirm-stripe", async (req, res) => {
   }
 });
 
+// FAST QUERY: Excludes multi-megabyte lockboxPhoto from user order list
 app.get("/api/orders/user/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
-    const orders = await Order.find({ $or: [{ buyerId: userId }, { "items.sellerId": userId }] }).sort({ createdAt: -1 });
+    const orders = await Order.find({ $or: [{ buyerId: userId }, { "items.sellerId": userId }] })
+      .select("-lockboxPhoto")
+      .sort({ createdAt: -1 })
+      .lean();
     res.json(orders);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -512,7 +518,7 @@ app.get("/api/orders/user/:userId", async (req, res) => {
 
 app.get("/api/ratings", async (req, res) => {
   try {
-    const ratings = await Rating.find().sort({ createdAt: -1 });
+    const ratings = await Rating.find().sort({ createdAt: -1 }).lean();
     res.json(ratings);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -525,12 +531,12 @@ app.post("/api/ratings", async (req, res) => {
     if (!stars || stars < 1 || stars > 5) return res.status(400).json({ error: "Please select a star rating between 1 and 5." });
     if (!comment || !comment.trim()) return res.status(400).json({ error: "Please write a comment for your review." });
 
-    const order = await Order.findById(orderId);
+    const order = await Order.findById(orderId).select("-lockboxPhoto").lean();
     if (!order) return res.status(404).json({ error: "Order not found." });
     if (order.status !== "active") return res.status(400).json({ error: "Ratings can only be submitted after payment has been verified." });
     if (String(order.buyerId) !== String(raterId)) return res.status(400).json({ error: "Only the Buyer can leave a rating for this transaction." });
 
-    const existingRating = await Rating.findOne({ orderId, listingId, raterId });
+    const existingRating = await Rating.findOne({ orderId, listingId, raterId }).lean();
     if (existingRating) return res.status(400).json({ error: "You have already rated the seller for this item." });
 
     const matchedItem = order.items.find((i) => String(i.listingId) === String(listingId)) || order.items[0];
@@ -540,7 +546,7 @@ app.post("/api/ratings", async (req, res) => {
       raterId, raterName, targetUserId, targetUserName, stars: Number(stars), comment: comment.trim()
     });
 
-    const allTargetRatings = await Rating.find({ targetUserId });
+    const allTargetRatings = await Rating.find({ targetUserId }).lean();
     const totalStars = allTargetRatings.reduce((sum, r) => sum + r.stars, 0);
     const avg = Number((totalStars / allTargetRatings.length).toFixed(1));
 
@@ -553,15 +559,24 @@ app.post("/api/ratings", async (req, res) => {
   }
 });
 
+// ==========================================
+// 5. ADMINISTRATION PORTAL & ANALYTICS ROUTES
+// ==========================================
+
+// FAST STATS: Excludes all Base64 images when calculating platform stats
 app.get("/api/admin/stats", verifyStaff, async (req, res) => {
   try {
-    const [listings, orders, ratings] = await Promise.all([ Listing.find(), Order.find({ status: { $ne: "cancelled" } }), Rating.find() ]);
+    const [listings, orders, ratingsCount] = await Promise.all([
+      Listing.find().select("title category subcategory").lean(),
+      Order.find({ status: { $ne: "cancelled" } }).select("items.deliveryMethod items.quantity paymentMethod").lean(),
+      Rating.countDocuments()
+    ]);
 
     const itemTitleCounts = {};
     const subcategoryCounts = {};
     listings.forEach((l) => {
-      const titleKey = l.title.trim();
-      itemTitleCounts[titleKey] = (itemTitleCounts[titleKey] || 0) + 1;
+      const titleKey = (l.title || "").trim();
+      if (titleKey) itemTitleCounts[titleKey] = (itemTitleCounts[titleKey] || 0) + 1;
       const subKey = `${l.category} › ${l.subcategory}`;
       subcategoryCounts[subKey] = (subcategoryCounts[subKey] || 0) + 1;
     });
@@ -570,7 +585,12 @@ app.get("/api/admin/stats", verifyStaff, async (req, res) => {
     const topCategories = Object.entries(subcategoryCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 5);
 
     const deliveryCounts = { pickup: 0, delivery: 0 };
-    orders.forEach((o) => { o.items.forEach((item) => { if (item.deliveryMethod === "delivery") deliveryCounts.delivery += Number(item.quantity || 1); else deliveryCounts.pickup += Number(item.quantity || 1); }); });
+    orders.forEach((o) => {
+      (o.items || []).forEach((item) => {
+        if (item.deliveryMethod === "delivery") deliveryCounts.delivery += Number(item.quantity || 1);
+        else deliveryCounts.pickup += Number(item.quantity || 1);
+      });
+    });
 
     const mostCommonDelivery = deliveryCounts.delivery > deliveryCounts.pickup ? "Delivery" : deliveryCounts.pickup > deliveryCounts.delivery ? "Local Pickup" : "Tied (Pickup & Delivery)";
 
@@ -581,16 +601,28 @@ app.get("/api/admin/stats", verifyStaff, async (req, res) => {
     const paymentLabels = { cash: "Cash in Lockbox", etransfer: "eTransfer", credit: "Credit Card", store_credit: "Store Credit" };
     const mostPopularPayment = sortedPayments[0] && sortedPayments[0][1] > 0 ? paymentLabels[sortedPayments[0][0]] : "No Delivery Payments Yet";
 
-    res.json({ totalListings: listings.length, totalOrders: orders.length, totalRatings: ratings.length, topPostedItems, topCategories, deliveryCounts, mostCommonDelivery, paymentCounts, mostPopularPayment });
+    res.json({ totalListings: listings.length, totalOrders: orders.length, totalRatings: ratingsCount, topPostedItems, topCategories, deliveryCounts, mostCommonDelivery, paymentCounts, mostPopularPayment });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
+// FAST ADMIN ORDERS: Strips heavy lockboxPhoto Base64 out of the list view
 app.get("/api/admin/orders", verifyStaff, async (req, res) => {
   try {
-    const orders = await Order.find().sort({ createdAt: -1 });
+    const orders = await Order.find().select("-lockboxPhoto").sort({ createdAt: -1 }).lean();
     res.json(orders);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ON-DEMAND PHOTO FETCH: Loads a single lockbox photo only when Admin clicks to view it
+app.get("/api/admin/orders/:id/lockbox-photo", verifyStaff, async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id).select("lockboxPhoto").lean();
+    if (!order || !order.lockboxPhoto) return res.status(404).json({ error: "Lockbox photo not found." });
+    res.json({ lockboxPhoto: order.lockboxPhoto });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -649,7 +681,7 @@ app.patch("/api/admin/orders/:id/cancel", verifyStaff, requireFullAdmin, async (
 
 app.get("/api/admin/users", verifyStaff, async (req, res) => {
   try {
-    const users = await User.find().select("-password").sort({ createdAt: -1 });
+    const users = await User.find().select("-password").sort({ createdAt: -1 }).lean();
     res.json(users);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -666,11 +698,11 @@ app.post("/api/admin/users", verifyStaff, requireFullAdmin, async (req, res) => 
     const email = isEmail ? contactMethod.toLowerCase().trim() : undefined;
     const phone = !isEmail ? contactMethod.trim() : undefined;
     if (email) {
-      const exists = await User.findOne({ email });
+      const exists = await User.findOne({ email }).lean();
       if (exists) return res.status(400).json({ error: "Email is already in use." });
     }
     if (phone) {
-      const exists = await User.findOne({ phone });
+      const exists = await User.findOne({ phone }).lean();
       if (exists) return res.status(400).json({ error: "Phone number is already in use." });
     }
     const salt = await bcrypt.genSalt(10);
@@ -714,7 +746,7 @@ app.patch("/api/admin/users/:id/reset-password", verifyStaff, requireFullAdmin, 
     if (pwError) return res.status(400).json({ error: pwError });
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
-    const updatedUser = await User.findByIdAndUpdate(req.params.id, { password: hashedPassword }, { new: true }).select("-password");
+    const updatedUser = await User.findByIdAndUpdate(req.params.id, { password: hashedPassword }, { new: true }).select("-password").lean();
     if (!updatedUser) return res.status(404).json({ error: "User not found." });
     res.json({ message: `Password successfully reset for ${updatedUser.name}.` });
   } catch (err) {
@@ -744,10 +776,17 @@ app.delete("/api/admin/emergency-clear-listings", verifyStaff, requireFullAdmin,
   }
 });
 
+// ==========================================
+// 6. DRIVER API ROUTES
+// ==========================================
+
 app.get("/api/driver/orders", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver" && req.staffUser.role !== "admin") return res.status(403).json({ error: "Driver or Admin access required." });
-    const orders = await Order.find({ dispatchStatus: { $in: ["pending", "active", "completed"] }, status: { $in: ["active", "cancelled"] } }).sort({ createdAt: -1 });
+    const orders = await Order.find({ dispatchStatus: { $in: ["pending", "active", "completed"] }, status: { $in: ["active", "cancelled"] } })
+      .select("-lockboxPhoto")
+      .sort({ createdAt: -1 })
+      .lean();
     const filteredOrders = req.staffUser.role === "admin" ? orders : orders.filter(o => o.dispatchStatus === "pending" || String(o.driverId) === String(req.staffUser._id));
     res.json(filteredOrders);
   } catch (err) {
@@ -857,9 +896,13 @@ app.patch("/api/driver/orders/:id/complete", verifyStaff, async (req, res) => {
   }
 });
 
+// ==========================================
+// 7. LISTINGS, CONVERSATIONS & SHIPPING ROUTES
+// ==========================================
+
 app.get("/api/listings", async (req, res) => {
   try {
-    const listings = await Listing.find().sort({ createdAt: -1 });
+    const listings = await Listing.find().sort({ createdAt: -1 }).lean();
     res.json(listings);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -868,7 +911,7 @@ app.get("/api/listings", async (req, res) => {
 
 app.post("/api/listings", async (req, res) => {
   try {
-    const seller = await User.findById(req.body.sellerId);
+    const seller = await User.findById(req.body.sellerId).lean();
     if (!seller) return res.status(404).json({ error: "Seller account not found." });
     if (seller.canPostListings === false) return res.status(403).json({ error: "Your account has been restricted from posting new listings." });
 
@@ -891,7 +934,7 @@ app.put("/api/listings/:id", async (req, res) => {
     const updated = await Listing.findByIdAndUpdate(req.params.id, { 
       title, description, price: Number(price || 0), stockCount: stock, status: stock > 0 ? "active" : "sold",
       isLocationMasked: isLocationMasked !== undefined ? isLocationMasked : true, isOversized: isOversized !== undefined ? isOversized : false, condition
-    }, { new: true });
+    }, { new: true }).lean();
     res.json(updated);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -918,7 +961,7 @@ app.patch("/api/listings/:id/status", async (req, res) => {
   try {
     const updateData = { status: req.body.status };
     if (req.body.status === "sold") updateData.stockCount = 0;
-    const updated = await Listing.findByIdAndUpdate(req.params.id, updateData, { new: true });
+    const updated = await Listing.findByIdAndUpdate(req.params.id, updateData, { new: true }).lean();
     res.json(updated);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -936,7 +979,7 @@ app.delete("/api/listings/:id", async (req, res) => {
 
 app.get("/api/conversations", async (req, res) => {
   try {
-    const convs = await Conversation.find().sort({ updatedAt: -1 });
+    const convs = await Conversation.find().sort({ updatedAt: -1 }).lean();
     res.json(convs);
   } catch (err) {
     res.status(500).json({ error: "Failed to load conversations" });
