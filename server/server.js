@@ -16,9 +16,6 @@ if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
 
 const app = express();
 
-// GLOBALLY DISABLE INFINITE HANGING
-mongoose.set('bufferCommands', false);
-
 app.use(
   cors({
     origin: true,
@@ -36,8 +33,6 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: "15mb" }));
 
 const JWT_SECRET = process.env.JWT_SECRET || "gogy_super_secret_dev_key_2026";
-
-// MEMORY CACHE FOR SMS VERIFICATION CODES
 const otpCache = new Map();
 
 function validateStrictPassword(pw) {
@@ -69,7 +64,6 @@ const userSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
 const User = mongoose.model("User", userSchema);
 
 const listingSchema = new mongoose.Schema(
@@ -81,19 +75,10 @@ const listingSchema = new mongoose.Schema(
     title: { type: String, required: true, trim: true },
     category: { type: String, required: true, index: true },
     subcategory: { type: String, required: true, index: true },
-    pricingType: {
-      type: String,
-      enum: ["fixed", "free"],
-      default: "fixed"
-    },
+    pricingType: { type: String, enum: ["fixed", "free"], default: "fixed" },
     price: { type: Number, default: 0 },
     stockCount: { type: Number, required: true, default: 1, min: 0 },
-    condition: { 
-      type: String, 
-      enum: ["New", "Used - Good", "Used - Fair"], 
-      required: true,
-      default: "New"
-    },
+    condition: { type: String, enum: ["New", "Used - Good", "Used - Fair"], required: true, default: "New" },
     location: { type: String, required: true },
     isLocationMasked: { type: Boolean, default: true }, 
     isOversized: { type: Boolean, default: false }, 
@@ -101,16 +86,10 @@ const listingSchema = new mongoose.Schema(
     deliveryFee: { type: Number, default: 0 },
     description: { type: String, required: true },
     images: [{ type: String }],
-    status: {
-      type: String,
-      enum: ["active", "pending", "sold"],
-      default: "active",
-      index: true
-    }
+    status: { type: String, enum: ["active", "pending", "sold"], default: "active", index: true }
   },
   { timestamps: true }
 );
-
 const Listing = mongoose.model("Listing", listingSchema);
 
 const conversationSchema = new mongoose.Schema(
@@ -131,7 +110,6 @@ const conversationSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
 const Conversation = mongoose.model("Conversation", conversationSchema);
 
 const orderSchema = new mongoose.Schema(
@@ -140,31 +118,10 @@ const orderSchema = new mongoose.Schema(
     buyerId: { type: String, required: true, index: true },
     buyerName: { type: String, required: true },
     buyerContact: { type: String },
-    paymentMethod: {
-      type: String,
-      enum: ["pickup", "cash", "etransfer", "credit", "store_credit"],
-      required: true
-    },
+    paymentMethod: { type: String, enum: ["pickup", "cash", "etransfer", "credit", "store_credit"], required: true },
     paymentOptionLabel: { type: String, required: true },
-    status: {
-      type: String,
-      enum: [
-        "pending_payment", 
-        "waiting_etransfer",
-        "waiting_cash",
-        "active",
-        "pickup_pending",
-        "cancelled"
-      ],
-      required: true,
-      index: true
-    },
-    dispatchStatus: {
-      type: String,
-      enum: ["N/A", "pending", "active", "completed"],
-      default: "N/A",
-      index: true
-    },
+    status: { type: String, enum: ["pending_payment", "waiting_etransfer", "waiting_cash", "active", "pickup_pending", "cancelled"], required: true, index: true },
+    dispatchStatus: { type: String, enum: ["N/A", "pending", "active", "completed"], default: "N/A", index: true },
     driverId: { type: String, default: null },
     driverName: { type: String, default: null },
     items: [
@@ -197,7 +154,6 @@ const orderSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
 const Order = mongoose.model("Order", orderSchema);
 
 const ratingSchema = new mongoose.Schema(
@@ -215,7 +171,6 @@ const ratingSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
 const Rating = mongoose.model("Rating", ratingSchema);
 
 // ==========================================
@@ -229,12 +184,8 @@ async function initializeDatabase() {
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash("AdminPass123", salt);
       await User.create({
-        accountType: "business",
-        role: "admin",
-        name: "GoGyMarket Master Admin",
-        email: masterEmail,
-        password: hashedPassword,
-        location: "2033 Yonge Street, Toronto"
+        accountType: "business", role: "admin", name: "GoGyMarket Master Admin",
+        email: masterEmail, password: hashedPassword, location: "2033 Yonge Street, Toronto"
       });
       console.log("🛡️ Created Master Admin: admin@gogymarket.com");
     }
@@ -276,10 +227,7 @@ async function sendOrderNotification({ listingId, listingTitle, buyerName, selle
 
   if (!conv) {
     conv = await Conversation.create({
-      listingId,
-      listingTitle,
-      buyerName,
-      sellerName,
+      listingId, listingTitle, buyerName, sellerName,
       messages: [{ sender: "GoGyMarket Admin", text, time: formattedTime }]
     });
   } else {
@@ -290,24 +238,10 @@ async function sendOrderNotification({ listingId, listingTitle, buyerName, selle
 }
 
 // ==========================================
-// FAIL-FAST DATABASE CHECKER
+// 3. API ROUTES
 // ==========================================
-app.use('/api', (req, res, next) => {
-  if (mongoose.connection.readyState === 0) {
-    return res.status(503).json({ error: "DATABASE_DISCONNECTED: The server has lost connection to MongoDB Atlas. Please check Render environment variables." });
-  }
-  next();
-});
-
-// ==========================================
-// 3. API ROUTES (AUTH & OTP)
-// ==========================================
-
 app.get("/", (req, res) => res.send("GoGyMarket API is live."));
-
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", dbConnected: mongoose.connection.readyState === 1 });
-});
+app.get("/api/health", (req, res) => { res.json({ status: "ok", dbConnected: mongoose.connection.readyState === 1 }); });
 
 app.post("/api/auth/send-otp", async (req, res) => {
   try {
@@ -326,19 +260,13 @@ app.post("/api/auth/send-otp", async (req, res) => {
     otpCache.set(phone, { code, expires: Date.now() + 10 * 60 * 1000 }); 
 
     if (twilioClient) {
-      await twilioClient.messages.create({
-        body: `Your GoGyMarket verification code is: ${code}`,
-        from: process.env.TWILIO_PHONE_NUMBER,
-        to: phone
-      });
+      await twilioClient.messages.create({ body: `Your GoGyMarket verification code is: ${code}`, from: process.env.TWILIO_PHONE_NUMBER, to: phone });
       console.log(`✅ Twilio SMS sent to ${phone}`);
     } else {
       console.log(`[DEV MODE] Twilio not configured. Verification code for ${phone} is: ${code}`);
     }
-
     res.json({ success: true, message: "Verification code sent." });
   } catch (err) {
-    console.error("Twilio Error:", err);
     res.status(500).json({ error: "Failed to send SMS code. Please check your phone number formatting." });
   }
 });
@@ -366,26 +294,15 @@ app.post("/api/auth/register", async (req, res) => {
     const displayName = accountType === "business" ? businessName : `${firstName} ${lastName}`;
 
     const newUser = await User.create({
-      accountType,
-      role: "user",
-      name: displayName,
-      email,
-      phone: verificationPhone,
-      password: hashedPassword,
-      location: location.trim(),
-      canPostListings: true,
-      credits: 0
+      accountType, role: "user", name: displayName, email, phone: verificationPhone,
+      password: hashedPassword, location: location.trim(), canPostListings: true, credits: 0
     });
 
     otpCache.delete(verificationPhone); 
-
     const token = jwt.sign({ id: newUser._id, role: newUser.role }, JWT_SECRET, { expiresIn: "7d" });
 
     res.status(201).json({
-      token,
-      user: {
-        id: newUser._id, name: newUser.name, email: newUser.email, phone: newUser.phone, location: newUser.location, role: newUser.role, canPostListings: newUser.canPostListings, credits: newUser.credits
-      }
+      token, user: { id: newUser._id, name: newUser.name, email: newUser.email, phone: newUser.phone, location: newUser.location, role: newUser.role, canPostListings: newUser.canPostListings, credits: newUser.credits }
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -406,10 +323,7 @@ app.post("/api/auth/login", async (req, res) => {
     const token = jwt.sign({ id: user._id, role: user.role || "user" }, JWT_SECRET, { expiresIn: "7d" });
 
     res.json({
-      token,
-      user: {
-        id: user._id, name: user.name, email: user.email, phone: user.phone, location: user.location, role: user.role || "user", canPostListings: user.canPostListings !== false, credits: user.credits || 0
-      }
+      token, user: { id: user._id, name: user.name, email: user.email, phone: user.phone, location: user.location, role: user.role || "user", canPostListings: user.canPostListings !== false, credits: user.credits || 0 }
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -444,16 +358,9 @@ app.patch("/api/users/:id/password", async (req, res) => {
   }
 });
 
-// ==========================================
-// 4. ORDER, RATING, CHECKOUT & STRIPE ROUTES
-// ==========================================
-
 app.post("/api/orders", async (req, res) => {
   try {
-    const {
-      buyerId, buyerName, buyerContact, paymentMethod, paymentOptionLabel, items, itemSubtotal, deliveryTotal, grandTotal, lockboxPhoto
-    } = req.body;
-
+    const { buyerId, buyerName, buyerContact, paymentMethod, paymentOptionLabel, items, itemSubtotal, deliveryTotal, grandTotal, lockboxPhoto } = req.body;
     if (!items || items.length === 0) return res.status(400).json({ error: "Cart cannot be empty." });
 
     const buyer = await User.findById(buyerId);
@@ -501,42 +408,23 @@ app.post("/api/orders", async (req, res) => {
     }
 
     const formattedItems = items.map((i) => ({
-      listingId: i._id || i.listingId,
-      title: i.title,
-      sellerId: i.sellerId,
-      sellerName: i.sellerName,
-      sellerLocation: i.location || i.sellerLocation || "",
-      quantity: Number(i.quantity || 1),
-      unitPrice: Number(i.price || i.unitPrice || 0),
-      shippingCost: Number(i.shippingCost || 0),
-      deliveryMethod: i.deliveryMethod || "pickup",
-      buyerLocationType: i.buyerLocationType || "address",
-      buyerAddress: i.buyerAddress || "",
-      buyerPin: i.buyerPin || "",
-      specialInstructions: i.specialInstructions || "",
-      isOversized: i.isOversized || false,
-      image: i.images?.[0] || i.image || ""
+      listingId: i._id || i.listingId, title: i.title, sellerId: i.sellerId, sellerName: i.sellerName,
+      sellerLocation: i.location || i.sellerLocation || "", quantity: Number(i.quantity || 1), unitPrice: Number(i.price || i.unitPrice || 0),
+      shippingCost: Number(i.shippingCost || 0), deliveryMethod: i.deliveryMethod || "pickup", buyerLocationType: i.buyerLocationType || "address",
+      buyerAddress: i.buyerAddress || "", buyerPin: i.buyerPin || "", specialInstructions: i.specialInstructions || "",
+      isOversized: i.isOversized || false, image: i.images?.[0] || i.image || ""
     }));
 
     const newOrder = await Order.create({
-      orderNumber, buyerId, buyerName, buyerContact, 
-      paymentMethod: finalPaymentMethod, 
-      paymentOptionLabel: finalPaymentLabel, 
-      status: initialStatus,
-      dispatchStatus: requiresDriver ? "pending" : "N/A",
-      items: formattedItems, 
-      itemSubtotal: Number(itemSubtotal || 0), 
-      deliveryTotal: Number(deliveryTotal || 0), 
-      grandTotal: Number(grandTotal || 0), 
-      creditsApplied: appliedCredits,
-      balanceDue: finalBalanceDue,
-      lockboxPhoto: lockboxPhoto || null
+      orderNumber, buyerId, buyerName, buyerContact, paymentMethod: finalPaymentMethod, paymentOptionLabel: finalPaymentLabel, 
+      status: initialStatus, dispatchStatus: requiresDriver ? "pending" : "N/A", items: formattedItems, 
+      itemSubtotal: Number(itemSubtotal || 0), deliveryTotal: Number(deliveryTotal || 0), grandTotal: Number(grandTotal || 0), 
+      creditsApplied: appliedCredits, balanceDue: finalBalanceDue, lockboxPhoto: lockboxPhoto || null
     });
 
     for (const item of formattedItems) {
       const itemTotal = item.unitPrice * item.quantity;
       let msg = "";
-      
       if (finalPaymentMethod === "credit") continue; 
 
       if (finalPaymentMethod === "store_credit") {
@@ -550,12 +438,9 @@ app.post("/api/orders", async (req, res) => {
       }
 
       if (msg) {
-        await sendOrderNotification({
-          listingId: item.listingId, listingTitle: item.title, buyerName, sellerName: item.sellerName, text: msg
-        });
+        await sendOrderNotification({ listingId: item.listingId, listingTitle: item.title, buyerName, sellerName: item.sellerName, text: msg });
       }
     }
-
     res.status(201).json(newOrder);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -565,52 +450,20 @@ app.post("/api/orders", async (req, res) => {
 app.post("/api/create-checkout-session", async (req, res) => {
   try {
     const { orderId, items, deliveryTotal, creditsApplied, balanceDue, domain } = req.body;
-
-    if (!process.env.STRIPE_SECRET_KEY) {
-      return res.status(500).json({ error: "Stripe key is not configured on the server." });
-    }
+    if (!process.env.STRIPE_SECRET_KEY) return res.status(500).json({ error: "Stripe key is not configured on the server." });
 
     let lineItems = [];
-
     if (creditsApplied > 0 && balanceDue > 0) {
-      lineItems = [{
-        price_data: {
-          currency: 'cad',
-          product_data: { name: "Order Balance (After Store Credits Applied)" },
-          unit_amount: Math.round(balanceDue * 100),
-        },
-        quantity: 1,
-      }];
+      lineItems = [{ price_data: { currency: 'cad', product_data: { name: "Order Balance (After Store Credits Applied)" }, unit_amount: Math.round(balanceDue * 100) }, quantity: 1 }];
     } else {
-      lineItems = items.map(item => ({
-        price_data: {
-          currency: 'cad', 
-          product_data: { name: item.title },
-          unit_amount: Math.round((item.price || item.unitPrice) * 100), 
-        },
-        quantity: item.quantity || 1,
-      }));
-
-      if (deliveryTotal > 0) {
-        lineItems.push({
-          price_data: {
-            currency: 'cad',
-            product_data: { name: "Delivery Fee" },
-            unit_amount: Math.round(deliveryTotal * 100),
-          },
-          quantity: 1,
-        });
-      }
+      lineItems = items.map(item => ({ price_data: { currency: 'cad', product_data: { name: item.title }, unit_amount: Math.round((item.price || item.unitPrice) * 100) }, quantity: item.quantity || 1 }));
+      if (deliveryTotal > 0) lineItems.push({ price_data: { currency: 'cad', product_data: { name: "Delivery Fee" }, unit_amount: Math.round(deliveryTotal * 100) }, quantity: 1 });
     }
 
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items: lineItems,
-      mode: 'payment',
-      success_url: `${domain}?session_id={CHECKOUT_SESSION_ID}&order_id=${orderId}&payment_success=true`,
-      cancel_url: `${domain}?payment_cancelled=true`,
+      payment_method_types: ['card'], line_items: lineItems, mode: 'payment',
+      success_url: `${domain}?session_id={CHECKOUT_SESSION_ID}&order_id=${orderId}&payment_success=true`, cancel_url: `${domain}?payment_cancelled=true`,
     });
-
     res.json({ url: session.url });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -623,18 +476,14 @@ app.post("/api/orders/confirm-stripe", async (req, res) => {
     if (!process.env.STRIPE_SECRET_KEY) return res.status(500).json({ error: "Stripe key missing."});
 
     const session = await stripe.checkout.sessions.retrieve(sessionId);
-
     if (session.payment_status === 'paid') {
       const order = await Order.findById(orderId);
       if (order && order.status === "pending_payment") {
         order.status = "active";
         await order.save();
-
         for (const item of order.items) {
           const msg = `✅ ORDER ${order.orderNumber} ACTIVE & PAID (Credit Card)\nItem: ${item.quantity}x ${item.title}\n\nPayment is complete! Seller ${item.sellerName}, please prepare this item.`;
-          await sendOrderNotification({
-            listingId: item.listingId, listingTitle: item.title, buyerName: order.buyerName, sellerName: item.sellerName, text: msg
-          });
+          await sendOrderNotification({ listingId: item.listingId, listingTitle: item.title, buyerName: order.buyerName, sellerName: item.sellerName, text: msg });
         }
       }
       res.json({ success: true, order });
@@ -649,9 +498,7 @@ app.post("/api/orders/confirm-stripe", async (req, res) => {
 app.get("/api/orders/user/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
-    const orders = await Order.find({
-      $or: [{ buyerId: userId }, { "items.sellerId": userId }]
-    }).sort({ createdAt: -1 });
+    const orders = await Order.find({ $or: [{ buyerId: userId }, { "items.sellerId": userId }] }).sort({ createdAt: -1 });
     res.json(orders);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -670,20 +517,13 @@ app.get("/api/ratings", async (req, res) => {
 app.post("/api/ratings", async (req, res) => {
   try {
     const { orderId, listingId, raterId, raterName, targetUserId, targetUserName, stars, comment } = req.body;
-
     if (!stars || stars < 1 || stars > 5) return res.status(400).json({ error: "Please select a star rating between 1 and 5." });
     if (!comment || !comment.trim()) return res.status(400).json({ error: "Please write a comment for your review." });
 
     const order = await Order.findById(orderId);
     if (!order) return res.status(404).json({ error: "Order not found." });
-
-    if (order.status !== "active") {
-      return res.status(400).json({ error: "Ratings can only be submitted after payment has been verified." });
-    }
-
-    if (String(order.buyerId) !== String(raterId)) {
-      return res.status(400).json({ error: "Only the Buyer can leave a rating for this transaction." });
-    }
+    if (order.status !== "active") return res.status(400).json({ error: "Ratings can only be submitted after payment has been verified." });
+    if (String(order.buyerId) !== String(raterId)) return res.status(400).json({ error: "Only the Buyer can leave a rating for this transaction." });
 
     const existingRating = await Rating.findOne({ orderId, listingId, raterId });
     if (existingRating) return res.status(400).json({ error: "You have already rated the seller for this item." });
@@ -700,10 +540,7 @@ app.post("/api/ratings", async (req, res) => {
     const avg = Number((totalStars / allTargetRatings.length).toFixed(1));
 
     await User.findByIdAndUpdate(targetUserId, { averageRating: avg, ratingCount: allTargetRatings.length });
-    await Listing.updateMany(
-      { sellerId: targetUserId },
-      { sellerRating: avg, sellerRatingCount: allTargetRatings.length }
-    );
+    await Listing.updateMany({ sellerId: targetUserId }, { sellerRating: avg, sellerRatingCount: allTargetRatings.length });
 
     res.status(201).json(newRating);
   } catch (err) {
@@ -711,17 +548,9 @@ app.post("/api/ratings", async (req, res) => {
   }
 });
 
-// ==========================================
-// 5. ADMINISTRATION PORTAL & ANALYTICS ROUTES
-// ==========================================
-
 app.get("/api/admin/stats", verifyStaff, async (req, res) => {
   try {
-    const [listings, orders, ratings] = await Promise.all([
-      Listing.find(),
-      Order.find({ status: { $ne: "cancelled" } }),
-      Rating.find()
-    ]);
+    const [listings, orders, ratings] = await Promise.all([ Listing.find(), Order.find({ status: { $ne: "cancelled" } }), Rating.find() ]);
 
     const itemTitleCounts = {};
     const subcategoryCounts = {};
@@ -736,28 +565,18 @@ app.get("/api/admin/stats", verifyStaff, async (req, res) => {
     const topCategories = Object.entries(subcategoryCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 5);
 
     const deliveryCounts = { pickup: 0, delivery: 0 };
-    orders.forEach((o) => {
-      o.items.forEach((item) => {
-        if (item.deliveryMethod === "delivery") deliveryCounts.delivery += Number(item.quantity || 1);
-        else deliveryCounts.pickup += Number(item.quantity || 1);
-      });
-    });
+    orders.forEach((o) => { o.items.forEach((item) => { if (item.deliveryMethod === "delivery") deliveryCounts.delivery += Number(item.quantity || 1); else deliveryCounts.pickup += Number(item.quantity || 1); }); });
 
     const mostCommonDelivery = deliveryCounts.delivery > deliveryCounts.pickup ? "Delivery" : deliveryCounts.pickup > deliveryCounts.delivery ? "Local Pickup" : "Tied (Pickup & Delivery)";
 
     const paymentCounts = { cash: 0, etransfer: 0, credit: 0 };
-    orders.forEach((o) => {
-      if (paymentCounts[o.paymentMethod] != null) paymentCounts[o.paymentMethod] += 1;
-    });
+    orders.forEach((o) => { if (paymentCounts[o.paymentMethod] != null) paymentCounts[o.paymentMethod] += 1; });
 
     const sortedPayments = Object.entries(paymentCounts).sort((a, b) => b[1] - a[1]);
     const paymentLabels = { cash: "Cash in Lockbox", etransfer: "eTransfer", credit: "Credit Card", store_credit: "Store Credit" };
     const mostPopularPayment = sortedPayments[0] && sortedPayments[0][1] > 0 ? paymentLabels[sortedPayments[0][0]] : "No Delivery Payments Yet";
 
-    res.json({
-      totalListings: listings.length, totalOrders: orders.length, totalRatings: ratings.length,
-      topPostedItems, topCategories, deliveryCounts, mostCommonDelivery, paymentCounts, mostPopularPayment
-    });
+    res.json({ totalListings: listings.length, totalOrders: orders.length, totalRatings: ratings.length, topPostedItems, topCategories, deliveryCounts, mostCommonDelivery, paymentCounts, mostPopularPayment });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -779,9 +598,7 @@ app.patch("/api/admin/orders/:id/verify", verifyStaff, requireFullAdmin, async (
     if (order.status !== "waiting_etransfer" && order.status !== "waiting_cash") return res.status(400).json({ error: "Only pending eTransfer or Cash orders require manual verification." });
 
     const previousType = order.status === "waiting_etransfer" ? "eTransfer" : "Cash Lockbox";
-    order.status = "active";
-    order.verifiedBy = req.staffUser.name;
-    order.verifiedAt = new Date();
+    order.status = "active"; order.verifiedBy = req.staffUser.name; order.verifiedAt = new Date();
     await order.save();
 
     for (const item of order.items) {
@@ -816,11 +633,8 @@ app.patch("/api/admin/orders/:id/cancel", verifyStaff, requireFullAdmin, async (
         text: `❌ ORDER CANCELLED BY ADMIN\nOrder: ${order.orderNumber}\nItem: ${item.quantity}x ${item.title}\n\nThis transaction has been cancelled by GoGyMarket Administration and any reserved stock has been returned to the listing.`
       });
     }
-
-    order.status = "cancelled";
-    if (order.dispatchStatus === "pending") order.dispatchStatus = "N/A";
-    order.verifiedBy = req.staffUser.name;
-    order.verifiedAt = new Date();
+    order.status = "cancelled"; if (order.dispatchStatus === "pending") order.dispatchStatus = "N/A";
+    order.verifiedBy = req.staffUser.name; order.verifiedAt = new Date();
     await order.save();
     res.json(order);
   } catch (err) {
@@ -856,10 +670,7 @@ app.post("/api/admin/users", verifyStaff, requireFullAdmin, async (req, res) => 
     }
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
-    const newAccount = await User.create({
-      accountType: accountType || (role === "user" ? "personal" : "business"),
-      role, name: name.trim(), email, phone, password: hashedPassword, location: location || "Toronto, ON"
-    });
+    const newAccount = await User.create({ accountType: accountType || (role === "user" ? "personal" : "business"), role, name: name.trim(), email, phone, password: hashedPassword, location: location || "Toronto, ON" });
     res.status(201).json(newAccount);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -871,10 +682,8 @@ app.patch("/api/admin/users/:id/credits", verifyStaff, requireFullAdmin, async (
     const { amount } = req.body;
     const user = await User.findById(req.params.id).select("-password");
     if (!user) return res.status(404).json({ error: "User not found." });
-    
     user.credits = (user.credits || 0) + Number(amount);
     await user.save();
-    
     res.json({ message: `Successfully added $${Number(amount).toLocaleString()} GYD credits to ${user.name}.`, user });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -912,15 +721,10 @@ app.patch("/api/admin/users/:id/toggle-posting", verifyStaff, requireFullAdmin, 
   try {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ error: "User not found." });
-    
     const currentStatus = user.canPostListings !== false;
     user.canPostListings = !currentStatus;
-    
     await user.save();
-    res.json({ 
-      message: `User posting access set to ${user.canPostListings}.`, 
-      canPostListings: user.canPostListings 
-    });
+    res.json({ message: `User posting access set to ${user.canPostListings}.`, canPostListings: user.canPostListings });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -935,25 +739,11 @@ app.delete("/api/admin/emergency-clear-listings", verifyStaff, requireFullAdmin,
   }
 });
 
-// ==========================================
-// 6. DRIVER API ROUTES
-// ==========================================
-
 app.get("/api/driver/orders", verifyStaff, async (req, res) => {
   try {
-    if (req.staffUser.role !== "driver" && req.staffUser.role !== "admin") {
-      return res.status(403).json({ error: "Driver or Admin access required." });
-    }
-    
-    const orders = await Order.find({
-      dispatchStatus: { $in: ["pending", "active", "completed"] },
-      status: { $in: ["active", "cancelled"] }
-    }).sort({ createdAt: -1 });
-
-    const filteredOrders = req.staffUser.role === "admin" 
-      ? orders 
-      : orders.filter(o => o.dispatchStatus === "pending" || String(o.driverId) === String(req.staffUser._id));
-
+    if (req.staffUser.role !== "driver" && req.staffUser.role !== "admin") return res.status(403).json({ error: "Driver or Admin access required." });
+    const orders = await Order.find({ dispatchStatus: { $in: ["pending", "active", "completed"] }, status: { $in: ["active", "cancelled"] } }).sort({ createdAt: -1 });
+    const filteredOrders = req.staffUser.role === "admin" ? orders : orders.filter(o => o.dispatchStatus === "pending" || String(o.driverId) === String(req.staffUser._id));
     res.json(filteredOrders);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -968,9 +758,7 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
     if (order.status === "cancelled") return res.status(400).json({ error: "Order has been cancelled." });
     if (order.dispatchStatus !== "pending") return res.status(400).json({ error: "This delivery is already active or completed." });
 
-    order.dispatchStatus = "active";
-    order.driverId = req.staffUser._id;
-    order.driverName = req.staffUser.name;
+    order.dispatchStatus = "active"; order.driverId = req.staffUser._id; order.driverName = req.staffUser.name;
     await order.save();
 
     const formattedTime = new Date().toLocaleTimeString("en-US", { timeZone: "America/Guyana", hour: "2-digit", minute: "2-digit" });
@@ -979,20 +767,12 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
     let dropoffConv = await Conversation.findOne({ orderId: String(order._id), isDeliveryChat: true, listingTitle: { $regex: /Dropoff/i } });
     if (!dropoffConv) {
       await Conversation.create({
-        listingId: String(order._id),
-        listingTitle: `Delivery Dropoff (Order ${order.orderNumber})`,
-        buyerName: order.buyerName, 
-        sellerName: req.staffUser.name, 
-        isDeliveryChat: true,
-        orderId: String(order._id),
-        messages: [{ sender: "GoGyMarket Dispatch", text: acceptMsg, time: formattedTime }]
+        listingId: String(order._id), listingTitle: `Delivery Dropoff (Order ${order.orderNumber})`, buyerName: order.buyerName, sellerName: req.staffUser.name, isDeliveryChat: true, orderId: String(order._id), messages: [{ sender: "GoGyMarket Dispatch", text: acceptMsg, time: formattedTime }]
       });
     } else {
       dropoffConv.sellerName = req.staffUser.name;
       const lastMsg = dropoffConv.messages[dropoffConv.messages.length - 1];
-      if (!lastMsg || lastMsg.text !== acceptMsg) {
-        dropoffConv.messages.push({ sender: "GoGyMarket Dispatch", text: acceptMsg, time: formattedTime });
-      }
+      if (!lastMsg || lastMsg.text !== acceptMsg) dropoffConv.messages.push({ sender: "GoGyMarket Dispatch", text: acceptMsg, time: formattedTime });
       await dropoffConv.save();
     }
 
@@ -1001,24 +781,15 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
       let pickupConv = await Conversation.findOne({ orderId: String(order._id), isDeliveryChat: true, listingTitle: { $regex: /Pickup/i }, sellerName: sName });
       if (!pickupConv) {
         await Conversation.create({
-          listingId: String(order._id),
-          listingTitle: `Delivery Pickup (Order ${order.orderNumber})`,
-          buyerName: req.staffUser.name, 
-          sellerName: sName,
-          isDeliveryChat: true,
-          orderId: String(order._id),
-          messages: [{ sender: "GoGyMarket Dispatch", text: acceptMsg, time: formattedTime }]
+          listingId: String(order._id), listingTitle: `Delivery Pickup (Order ${order.orderNumber})`, buyerName: req.staffUser.name, sellerName: sName, isDeliveryChat: true, orderId: String(order._id), messages: [{ sender: "GoGyMarket Dispatch", text: acceptMsg, time: formattedTime }]
         });
       } else {
         pickupConv.buyerName = req.staffUser.name;
         const lastMsg = pickupConv.messages[pickupConv.messages.length - 1];
-        if (!lastMsg || lastMsg.text !== acceptMsg) {
-          pickupConv.messages.push({ sender: "GoGyMarket Dispatch", text: acceptMsg, time: formattedTime });
-        }
+        if (!lastMsg || lastMsg.text !== acceptMsg) pickupConv.messages.push({ sender: "GoGyMarket Dispatch", text: acceptMsg, time: formattedTime });
         await pickupConv.save();
       }
     }
-
     res.json(order);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1030,14 +801,10 @@ app.patch("/api/driver/orders/:id/cancel-assignment", verifyStaff, async (req, r
     if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can cancel their assignment." });
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ error: "Order not found." });
-    if (String(order.driverId) !== String(req.staffUser._id)) {
-      return res.status(403).json({ error: "You are not assigned to this delivery." });
-    }
+    if (String(order.driverId) !== String(req.staffUser._id)) return res.status(403).json({ error: "You are not assigned to this delivery." });
     if (order.dispatchStatus !== "active") return res.status(400).json({ error: "This delivery is not currently active." });
 
-    order.dispatchStatus = "pending";
-    order.driverId = null;
-    order.driverName = null;
+    order.dispatchStatus = "pending"; order.driverId = null; order.driverName = null;
     await order.save();
 
     const formattedTime = new Date().toLocaleTimeString("en-US", { timeZone: "America/Guyana", hour: "2-digit", minute: "2-digit" });
@@ -1051,7 +818,6 @@ app.patch("/api/driver/orders/:id/cancel-assignment", verifyStaff, async (req, r
         await c.save();
       }
     }
-
     res.json(order);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1063,9 +829,7 @@ app.patch("/api/driver/orders/:id/complete", verifyStaff, async (req, res) => {
     if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can complete delivery requests." });
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ error: "Order not found." });
-    if (String(order.driverId) !== String(req.staffUser._id)) {
-      return res.status(403).json({ error: "You are not assigned to this delivery." });
-    }
+    if (String(order.driverId) !== String(req.staffUser._id)) return res.status(403).json({ error: "You are not assigned to this delivery." });
     if (order.dispatchStatus !== "active") return res.status(400).json({ error: "This delivery is not currently active." });
 
     order.dispatchStatus = "completed";
@@ -1082,16 +846,11 @@ app.patch("/api/driver/orders/:id/complete", verifyStaff, async (req, res) => {
         await c.save();
       }
     }
-    
     res.json(order);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
-
-// ==========================================
-// 7. LISTINGS, CONVERSATIONS & SHIPPING ROUTES
-// ==========================================
 
 app.get("/api/listings", async (req, res) => {
   try {
@@ -1106,18 +865,12 @@ app.post("/api/listings", async (req, res) => {
   try {
     const seller = await User.findById(req.body.sellerId);
     if (!seller) return res.status(404).json({ error: "Seller account not found." });
-    if (seller.canPostListings === false) {
-      return res.status(403).json({ error: "Your account has been restricted from posting new listings." });
-    }
+    if (seller.canPostListings === false) return res.status(403).json({ error: "Your account has been restricted from posting new listings." });
 
     const stock = req.body.stockCount != null ? Number(req.body.stockCount) : 1;
     const newListing = await Listing.create({
-      ...req.body,
-      stockCount: stock,
-      status: stock > 0 ? "active" : "sold",
-      sellerRating: seller.averageRating || 0,
-      sellerRatingCount: seller.ratingCount || 0,
-      isLocationMasked: req.body.isLocationMasked !== undefined ? req.body.isLocationMasked : true,
+      ...req.body, stockCount: stock, status: stock > 0 ? "active" : "sold", sellerRating: seller.averageRating || 0,
+      sellerRatingCount: seller.ratingCount || 0, isLocationMasked: req.body.isLocationMasked !== undefined ? req.body.isLocationMasked : true,
       isOversized: req.body.isOversized || false 
     });
     res.status(201).json(newListing);
@@ -1130,21 +883,10 @@ app.put("/api/listings/:id", async (req, res) => {
   try {
     const { title, description, price, stockCount, isLocationMasked, isOversized, condition } = req.body;
     const stock = stockCount != null ? Number(stockCount) : 1;
-    
-    const updated = await Listing.findByIdAndUpdate(
-      req.params.id,
-      { 
-        title, 
-        description, 
-        price: Number(price || 0),
-        stockCount: stock,
-        status: stock > 0 ? "active" : "sold",
-        isLocationMasked: isLocationMasked !== undefined ? isLocationMasked : true,
-        isOversized: isOversized !== undefined ? isOversized : false,
-        condition
-      },
-      { new: true }
-    );
+    const updated = await Listing.findByIdAndUpdate(req.params.id, { 
+      title, description, price: Number(price || 0), stockCount: stock, status: stock > 0 ? "active" : "sold",
+      isLocationMasked: isLocationMasked !== undefined ? isLocationMasked : true, isOversized: isOversized !== undefined ? isOversized : false, condition
+    }, { new: true });
     res.json(updated);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1256,43 +998,27 @@ app.delete("/api/conversations/:id", async (req, res) => {
 
 async function formatWaypoint(inputStr) {
   if (!inputStr || typeof inputStr !== "string") return { address: "Toronto, ON" };
-
   let urlToTest = inputStr;
-  
   if (inputStr.includes("maps.app.goo.gl") || inputStr.includes("goo.gl") || inputStr.includes("maps.google.com")) {
     try {
-      const response = await fetch(inputStr, { 
-        method: "GET", 
-        redirect: "follow",
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" 
-        }
-      });
+      const response = await fetch(inputStr, { method: "GET", redirect: "follow", headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }});
       urlToTest = response.url;
-    } catch (e) {
-      console.error("Failed to unwrap short URL:", e);
-    }
+    } catch (e) { console.error("Failed to unwrap short URL:", e); }
   }
-
   const pinMatch = urlToTest.match(/3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
   if (pinMatch) return { location: { latLng: { latitude: parseFloat(pinMatch[1]), longitude: parseFloat(pinMatch[2]) } } };
-  
   const atMatch = urlToTest.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
   if (atMatch) return { location: { latLng: { latitude: parseFloat(atMatch[1]), longitude: parseFloat(atMatch[2]) } } };
-
   const qMatch = urlToTest.match(/q=(-?\d+\.\d+),(-?\d+\.\d+)/);
   if (qMatch) return { location: { latLng: { latitude: parseFloat(qMatch[1]), longitude: parseFloat(qMatch[2]) } } };
-
   const rawMatch = urlToTest.match(/^(-?\d+\.\d+),\s*(-?\d+\.\d+)$/);
   if (rawMatch) return { location: { latLng: { latitude: parseFloat(rawMatch[1]), longitude: parseFloat(rawMatch[2]) } } };
-
   const placeMatch = urlToTest.match(/\/place\/([^\/]+)/);
   if (placeMatch) {
     let decoded = decodeURIComponent(placeMatch[1]).replace(/\+/g, " ");
     if (decoded.includes("@")) decoded = decoded.split("@")[0];
     return { address: decoded };
   }
-
   return { address: inputStr };
 }
 
@@ -1302,32 +1028,22 @@ app.post("/api/shipping-quote", async (req, res) => {
     if (!process.env.GOOGLE_MAPS_API_KEY) return res.status(500).json({ error: "Google Maps API key missing." });
     
     const mapUrl = "https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix";
-    const requestBody = { 
-      origins: [{ waypoint: await formatWaypoint(origin) }], 
-      destinations: [{ waypoint: await formatWaypoint(destination) }], 
-      travelMode: "DRIVE" 
-    };
+    const requestBody = { origins: [{ waypoint: await formatWaypoint(origin) }], destinations: [{ waypoint: await formatWaypoint(destination) }], travelMode: "DRIVE" };
 
     const response = await fetch(mapUrl, { 
       method: "POST", 
-      headers: { 
-        "Content-Type": "application/json", 
-        "X-Goog-Api-Key": process.env.GOOGLE_MAPS_API_KEY, 
-        "X-Goog-FieldMask": "originIndex,destinationIndex,duration,distanceMeters,status,condition" 
-      }, 
-      body: JSON.stringify(requestBody) 
+      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": process.env.GOOGLE_MAPS_API_KEY, "X-Goog-FieldMask": "originIndex,destinationIndex,duration,distanceMeters,status,condition" }, 
+      body: JSON.stringify(requestBody)
     });
-    
+
     const data = await response.json();
     
     if (data.error) return res.status(400).json({ error: `Google API Error: ${data.error.message}` });
-    
     if (Array.isArray(data) && data.length > 0) {
       if (data[0].distanceMeters != null) {
         const distanceKm = Math.ceil(data[0].distanceMeters / 1000);
         const ratePerKm = isOversized ? 30 : 20;
         const shippingCost = distanceKm * ratePerKm;
-
         return res.json({ success: true, distanceKm, shippingCost, formattedDistance: `${distanceKm} km` });
       } else if (data[0].status && data[0].status.message) {
         return res.status(400).json({ error: `Google Maps: ${data[0].status.message}` });
@@ -1345,11 +1061,10 @@ app.post("/api/shipping-quote", async (req, res) => {
 if (process.env.MONGO_URI) {
   mongoose
     .connect(process.env.MONGO_URI, { 
-      serverSelectionTimeoutMS: 5000, 
-      socketTimeoutMS: 45000 
+      family: 4 // FORCE IPv4 TO FIX RENDER'S 3 MINUTE IPV6 DNS HANG
     })
     .then(async () => {
-      console.log("✅ Connected to MongoDB Atlas");
+      console.log("✅ Connected to MongoDB Atlas via IPv4");
       await initializeDatabase();
     })
     .catch((err) => console.error("❌ MongoDB connection error:", err.message));
