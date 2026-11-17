@@ -25,14 +25,15 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
   const [newCity, setNewCity] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newConfirmPassword, setNewConfirmPassword] = useState("");
-  // NEW: Password Toggle for Create Account Form
   const [showNewPassword, setShowNewPassword] = useState(false);
 
   const [resetTargetUser, setResetTargetUser] = useState(null);
   const [resetPassword, setResetPassword] = useState("");
   const [resetConfirmPassword, setResetConfirmPassword] = useState("");
-  // NEW: Password Toggle for Reset Form
   const [showResetPassword, setShowResetPassword] = useState(false);
+  
+  // NEW: State for adding credits
+  const [creditAmounts, setCreditAmounts] = useState({});
 
   const [feedback, setFeedback] = useState({ type: "", text: "" });
 
@@ -166,6 +167,30 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
     }
   };
 
+  // ADMIN: Handle adding credits to a user
+  const handleAddCredit = async (userId) => {
+    if (!isFullAdmin) return;
+    const amount = Number(creditAmounts[userId] || 0);
+    if (amount <= 0) return;
+
+    setFeedback({ type: "", text: "" });
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/users/${userId}/credits`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ amount })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to add credits");
+
+      setUsers((prev) => prev.map((u) => u._id === userId ? { ...u, credits: data.user.credits } : u));
+      setCreditAmounts(prev => ({ ...prev, [userId]: "" }));
+      setFeedback({ type: "success", text: data.message });
+    } catch (err) {
+      setFeedback({ type: "error", text: err.message });
+    }
+  };
+
   const handleDeleteUser = async (userObj) => {
     if (!isFullAdmin) return;
     const confirmed = window.confirm(
@@ -275,7 +300,7 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
       case "pending_payment":
         return <span className="bg-orange-100 text-orange-800 border border-orange-300 text-xs font-extrabold px-2.5 py-1 rounded-full">💳 Incomplete Checkout (Stripe)</span>;
       case "active":
-        return <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-extrabold px-2.5 py-1 rounded-full">✅ Active & Paid {paymentMethod === "credit" ? "(Stripe Auto)" : "(Admin Verified)"}</span>;
+        return <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-extrabold px-2.5 py-1 rounded-full">✅ Active & Paid {paymentMethod === "credit" ? "(Stripe Auto)" : paymentMethod === "store_credit" ? "(Store Credit)" : "(Admin Verified)"}</span>;
       case "pickup_pending":
         return <span className="bg-slate-100 text-slate-700 border border-slate-300 text-xs font-bold px-2.5 py-1 rounded-full">🤝 Local Pickup (Buyer & Seller)</span>;
       case "cancelled":
@@ -662,28 +687,49 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
                             ⭐ {u.averageRating} ({u.ratingCount})
                           </span>
                         )}
+                        <span className="text-[11px] font-bold px-2 py-0.5 bg-slate-800 text-slate-200 rounded-full">
+                          💰 ${(u.credits || 0).toLocaleString()} GYD
+                        </span>
                       </div>
                       <p className="text-xs text-slate-500 mt-0.5">{u.email || u.phone} • 📍 {u.location}</p>
                     </div>
 
                     {isFullAdmin && (
-                      <div className="flex items-center gap-2">
-                        {u.role === "user" && (
-                          <button 
-                            onClick={() => handleTogglePosting(u)} 
-                            className={`text-xs font-bold px-3 py-1.5 rounded-lg border ${!isRestricted ? "bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200" : "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200"}`}
-                          >
-                            {!isRestricted ? "🚫 Restrict Posting" : "✅ Allow Posting"}
+                      <div className="flex flex-col items-end gap-2">
+                        <div className="flex items-center gap-2">
+                           <input 
+                              type="number" 
+                              min="0" 
+                              placeholder="$ Amount"
+                              value={creditAmounts[u._id] || ""}
+                              onChange={e => setCreditAmounts(prev => ({...prev, [u._id]: e.target.value}))}
+                              className="border border-slate-300 rounded px-2 py-1 text-xs w-24 focus:outline-none focus:border-emerald-500"
+                           />
+                           <button 
+                              onClick={() => handleAddCredit(u._id)}
+                              className="text-xs font-bold px-3 py-1 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200"
+                           >
+                             + Add Credit
+                           </button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {u.role === "user" && (
+                            <button 
+                              onClick={() => handleTogglePosting(u)} 
+                              className={`text-xs font-bold px-3 py-1.5 rounded-lg border ${!isRestricted ? "bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200" : "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200"}`}
+                            >
+                              {!isRestricted ? "🚫 Restrict Posting" : "✅ Allow Posting"}
+                            </button>
+                          )}
+                          <button onClick={() => { setResetTargetUser(u); setResetPassword(""); setResetConfirmPassword(""); setShowResetPassword(false); }} className="text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg">
+                            🔑 Reset Password
                           </button>
-                        )}
-                        <button onClick={() => { setResetTargetUser(u); setResetPassword(""); setResetConfirmPassword(""); setShowResetPassword(false); }} className="text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg">
-                          🔑 Reset Password
-                        </button>
-                        {!isSelf && (
-                          <button onClick={() => handleDeleteUser(u)} className="text-xs font-bold bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-3 py-1.5 rounded-lg">
-                            🗑️ Delete
-                          </button>
-                        )}
+                          {!isSelf && (
+                            <button onClick={() => handleDeleteUser(u)} className="text-xs font-bold bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-3 py-1.5 rounded-lg">
+                              🗑️ Delete
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
