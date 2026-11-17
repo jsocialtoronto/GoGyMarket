@@ -296,21 +296,11 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", dbConnected: mongoose.connection.readyState === 1 });
 });
 
-// NEW: Request SMS OTP and Validate Address Constraint
 app.post("/api/auth/send-otp", async (req, res) => {
   try {
-    const { phone, email, location } = req.body;
+    const { phone, email } = req.body;
     if (!phone) return res.status(400).json({ error: "Phone number is required for verification." });
 
-    // 1. Strict 1:1 Address Check
-    if (location) {
-      const existingAddress = await User.findOne({ location: location.trim(), role: "user" });
-      if (existingAddress) {
-        return res.status(400).json({ error: "Registration Denied: An account is already registered at this household address. Limit is 1 account per address." });
-      }
-    }
-
-    // 2. Strict Phone/Email Check
     const existingPhone = await User.findOne({ phone: phone.trim() });
     if (existingPhone) return res.status(400).json({ error: "This phone number is already registered to an active account." });
 
@@ -319,9 +309,8 @@ app.post("/api/auth/send-otp", async (req, res) => {
       if (existingEmail) return res.status(400).json({ error: "This email address is already registered." });
     }
 
-    // Generate 6 digit code
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    otpCache.set(phone, { code, expires: Date.now() + 10 * 60 * 1000 }); // Valid for 10 mins
+    otpCache.set(phone, { code, expires: Date.now() + 10 * 60 * 1000 }); 
 
     if (twilioClient) {
       await twilioClient.messages.create({
@@ -345,22 +334,19 @@ app.post("/api/auth/register", async (req, res) => {
   try {
     const { accountType, firstName, lastName, businessName, contactMethod, verificationPhone, verificationCode, password, location } = req.body;
     
-    // Validate Password
     const pwError = validateStrictPassword(password);
     if (pwError) return res.status(400).json({ error: pwError });
 
-    // Verify OTP
     const cachedOtp = otpCache.get(verificationPhone);
     if (!cachedOtp || cachedOtp.expires < Date.now() || cachedOtp.code !== verificationCode) {
       return res.status(400).json({ error: "Invalid or expired verification code." });
     }
 
+    const existingPhone = await User.findOne({ phone: verificationPhone.trim() });
+    if (existingPhone) return res.status(400).json({ error: "Registration Denied: This phone number is already registered." });
+
     const isEmail = contactMethod.includes("@");
     const email = isEmail ? contactMethod.toLowerCase().trim() : undefined;
-    
-    // Double check constraints just in case of race condition
-    const existingAddress = await User.findOne({ location: location.trim(), role: "user" });
-    if (existingAddress) return res.status(400).json({ error: "Registration Denied: An account is already registered at this address." });
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
@@ -378,7 +364,7 @@ app.post("/api/auth/register", async (req, res) => {
       credits: 0
     });
 
-    otpCache.delete(verificationPhone); // Clear cache after success
+    otpCache.delete(verificationPhone); 
 
     const token = jwt.sign({ id: newUser._id, role: newUser.role }, JWT_SECRET, { expiresIn: "7d" });
 
