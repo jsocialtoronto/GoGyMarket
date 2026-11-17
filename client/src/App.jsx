@@ -86,17 +86,17 @@ export default function App() {
     try {
       setIsLoading(true);
       const timestamp = Date.now();
-      
-      const [listingsRes, convsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/listings?t=${timestamp}`, { cache: "no-store" }),
-        fetch(`${API_BASE}/api/conversations?t=${timestamp}`, { cache: "no-store" })
-      ]);
 
+      // 1. Fetch listings FIRST and immediately unblock the Search screen
+      const listingsRes = await fetch(`${API_BASE}/api/listings?t=${timestamp}`, { cache: "no-store" });
       if (listingsRes.ok) {
-        const listingsData = await listingsRes.json();
-        setListings(Array.isArray(listingsData) ? listingsData : []);
+        const data = await listingsRes.json();
+        setListings(Array.isArray(data) ? data : []);
       }
+      setIsLoading(false); // Unblocks Search tab immediately!
 
+      // 2. Load conversations, orders, and ratings in the background without blocking the UI
+      const convsRes = await fetch(`${API_BASE}/api/conversations?t=${timestamp}`, { cache: "no-store" });
       if (convsRes.ok) {
         const convsData = await convsRes.json();
         const validConvs = Array.isArray(convsData) ? convsData : [];
@@ -111,7 +111,6 @@ export default function App() {
           fetch(`${API_BASE}/api/ratings?t=${timestamp}`, { cache: "no-store" }),
           fetch(`${API_BASE}/api/users/${currentUser.id}?t=${timestamp}`, { cache: "no-store" })
         ]);
-        
         if (ordersRes.ok) {
           const oData = await ordersRes.json();
           setMyOrders(Array.isArray(oData) ? oData : []);
@@ -122,7 +121,6 @@ export default function App() {
         }
         if (userRes.ok) {
           const uData = await userRes.json();
-          // FIXED: Prevents the infinite re-render loop by aborting if credits match exactly
           setCurrentUser(prev => {
             if (!prev || prev.credits === (uData.credits || 0)) return prev;
             const updated = { ...prev, credits: uData.credits || 0 };
@@ -133,7 +131,6 @@ export default function App() {
       }
     } catch (err) {
       console.error("Error loading data:", err);
-    } finally {
       setIsLoading(false);
     }
   };
@@ -167,12 +164,11 @@ export default function App() {
     }
   };
 
-  // FIXED: Dependency array strictly tracks ID to kill the infinite loading loop
   useEffect(() => {
     if (currentUser?.id) {
       if (currentUser.role === "driver") {
         loadDriverData();
-      } else {
+      } else if (currentUser.role !== "admin" && currentUser.role !== "viewer") {
         loadMarketplaceData();
       }
     }
@@ -301,6 +297,11 @@ export default function App() {
   const handleSelfPasswordReset = async (e) => {
     e.preventDefault();
     setResetPasswordFeedback({ type: "", text: "" });
+
+    if (resetNewPassword !== resetConfirmPassword) {
+      setResetPasswordFeedback({ type: "error", text: "Passwords do not match." });
+      return;
+    }
 
     try {
       const res = await fetch(`${API_BASE}/api/users/${currentUser.id}/password`, {
@@ -511,7 +512,7 @@ export default function App() {
     const conv = conversations.find(c => String(c._id) === String(convId));
     if (conv) {
       const hasActiveDelivery = myOrders.some(o => 
-        o.items?.some(i => String(i.listingId) === String(conv.listingId)) &&
+        (String(o._id) === String(conv.orderId) || String(o._id) === String(conv.listingId) || o.items?.some(i => String(i.listingId) === String(conv.listingId))) &&
         o.status !== "cancelled" && 
         (o.dispatchStatus === "pending" || o.dispatchStatus === "active")
       );
@@ -537,7 +538,7 @@ export default function App() {
     const conv = conversations.find(c => String(c._id) === String(convId));
     if (conv) {
       const hasActiveDelivery = myOrders.some(o => 
-        o.items?.some(i => String(i.listingId) === String(conv.listingId)) &&
+        (String(o._id) === String(conv.orderId) || String(o._id) === String(conv.listingId) || o.items?.some(i => String(i.listingId) === String(conv.listingId))) &&
         o.status !== "cancelled" && 
         (o.dispatchStatus === "pending" || o.dispatchStatus === "active")
       );
@@ -710,8 +711,6 @@ export default function App() {
             setItemDistances(prev => ({ ...prev, [item._id]: "Distance unknown" }));
           }
         }
-        
-        await new Promise(resolve => setTimeout(resolve, 300));
       }
     };
 
@@ -725,9 +724,6 @@ export default function App() {
   const myListings = (listings || []).filter((item) => String(item?.sellerId) === String(currentUser?.id));
   const favouriteListings = (listings || []).filter((item) => favouriteIds.includes(item?._id));
 
-  // ==========================================
-  // RENDER UI
-  // ==========================================
   if (!currentUser) {
     return (
       <AuthScreen
@@ -949,12 +945,10 @@ export default function App() {
                                     
                                     return (
                                       <div key={`chat-${chatInfo.conv._id}`} className="mt-2 border border-slate-200 rounded-xl overflow-hidden bg-slate-50 flex flex-col h-[350px] animate-in fade-in slide-in-from-top-2">
-                                        
                                         <div className="bg-slate-900 text-white px-4 py-2.5 text-xs font-bold flex justify-between items-center shrink-0">
                                           <span className="truncate max-w-[200px]">Message {chatInfo.label} ({chatInfo.party})</span>
                                           <button onClick={() => setExpandedChatConvId(null)} className="hover:text-red-400">✕ Close</button>
                                         </div>
-                                        
                                         <div className="flex-1 overflow-y-auto p-4 space-y-4">
                                           {(Array.isArray(chatInfo.conv.messages) ? chatInfo.conv.messages : []).map((m, mIdx) => {
                                             if (!m || typeof m !== 'object') return null;
@@ -1561,7 +1555,7 @@ export default function App() {
                         
                         let sidebarTitle = conv.listingTitle;
                         if (!sidebarTitle || sidebarTitle.includes("Order")) {
-                           const matchOrder = myOrders.find(o => o.items?.some(i => String(i.listingId) === String(conv.listingId) || String(o._id) === String(conv.listingId)));
+                           const matchOrder = myOrders.find(o => String(o._id) === String(conv.orderId) || String(o._id) === String(conv.listingId) || o.items?.some(i => String(i.listingId) === String(conv.listingId)));
                            if (matchOrder) {
                              const matchedItem = matchOrder.items.find(i => String(i.listingId) === String(conv.listingId)) || matchOrder.items[0];
                              sidebarTitle = matchedItem?.title;
@@ -1617,7 +1611,7 @@ export default function App() {
                       let headerImage = "";
                       let displayTitle = activeChat.listingTitle;
 
-                      const matchedOrder = myOrders.find(o => o.items?.some(i => String(i.listingId) === String(activeChat.listingId) || String(o._id) === String(activeChat.listingId)));
+                      const matchedOrder = myOrders.find(o => String(o._id) === String(activeChat.orderId) || String(o._id) === String(activeChat.listingId) || o.items?.some(i => String(i.listingId) === String(activeChat.listingId)));
                       if (matchedOrder) {
                         const matchedItem = matchedOrder.items.find(i => String(i.listingId) === String(activeChat.listingId)) || matchedOrder.items[0];
                         if (matchedItem?.image) headerImage = matchedItem.image;
