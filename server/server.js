@@ -1,4 +1,8 @@
 // server/server.js
+// FIX: Force Node 18+ to use IPv4 first to prevent the 3-minute MongoDB Atlas DNS hang
+const dns = require('node:dns');
+dns.setDefaultResultOrder('ipv4first');
+
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
@@ -6,9 +10,10 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
 
+mongoose.set('bufferCommands', false);
+
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
-// TWILIO SETUP
 let twilioClient = null;
 if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
   twilioClient = require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -43,10 +48,6 @@ function validateStrictPassword(pw) {
   }
   return null;
 }
-
-// ==========================================
-// 1. MONGOOSE SCHEMAS & MODELS
-// ==========================================
 
 const userSchema = new mongoose.Schema(
   {
@@ -173,9 +174,6 @@ const ratingSchema = new mongoose.Schema(
 );
 const Rating = mongoose.model("Rating", ratingSchema);
 
-// ==========================================
-// 2. CLEANUP & MASTER ADMIN BOOTSTRAP
-// ==========================================
 async function initializeDatabase() {
   try {
     const masterEmail = "admin@gogymarket.com";
@@ -237,9 +235,13 @@ async function sendOrderNotification({ listingId, listingTitle, buyerName, selle
   return conv;
 }
 
-// ==========================================
-// 3. API ROUTES
-// ==========================================
+app.use('/api', (req, res, next) => {
+  if (mongoose.connection.readyState === 0) {
+    return res.status(503).json({ error: "DATABASE_DISCONNECTED: The server has lost connection to MongoDB Atlas. Please check Render environment variables." });
+  }
+  next();
+});
+
 app.get("/", (req, res) => res.send("GoGyMarket API is live."));
 app.get("/api/health", (req, res) => { res.json({ status: "ok", dbConnected: mongoose.connection.readyState === 1 }); });
 
@@ -1030,26 +1032,36 @@ app.post("/api/shipping-quote", async (req, res) => {
     const mapUrl = "https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix";
     const requestBody = { origins: [{ waypoint: await formatWaypoint(origin) }], destinations: [{ waypoint: await formatWaypoint(destination) }], travelMode: "DRIVE" };
 
-    const response = await fetch(mapUrl, { 
-      method: "POST", 
-      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": process.env.GOOGLE_MAPS_API_KEY, "X-Goog-FieldMask": "originIndex,destinationIndex,duration,distanceMeters,status,condition" }, 
-      body: JSON.stringify(requestBody)
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
 
-    const data = await response.json();
-    
-    if (data.error) return res.status(400).json({ error: `Google API Error: ${data.error.message}` });
-    if (Array.isArray(data) && data.length > 0) {
-      if (data[0].distanceMeters != null) {
-        const distanceKm = Math.ceil(data[0].distanceMeters / 1000);
-        const ratePerKm = isOversized ? 30 : 20;
-        const shippingCost = distanceKm * ratePerKm;
-        return res.json({ success: true, distanceKm, shippingCost, formattedDistance: `${distanceKm} km` });
-      } else if (data[0].status && data[0].status.message) {
-        return res.status(400).json({ error: `Google Maps: ${data[0].status.message}` });
+    try {
+      const response = await fetch(mapUrl, { 
+        method: "POST", 
+        headers: { "Content-Type": "application/json", "X-Goog-Api-Key": process.env.GOOGLE_MAPS_API_KEY, "X-Goog-FieldMask": "originIndex,destinationIndex,duration,distanceMeters,status,condition" }, 
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      const data = await response.json();
+      
+      if (data.error) return res.status(400).json({ error: `Google API Error: ${data.error.message}` });
+      if (Array.isArray(data) && data.length > 0) {
+        if (data[0].distanceMeters != null) {
+          const distanceKm = Math.ceil(data[0].distanceMeters / 1000);
+          const ratePerKm = isOversized ? 30 : 20;
+          const shippingCost = distanceKm * ratePerKm;
+          return res.json({ success: true, distanceKm, shippingCost, formattedDistance: `${distanceKm} km` });
+        } else if (data[0].status && data[0].status.message) {
+          return res.status(400).json({ error: `Google Maps: ${data[0].status.message}` });
+        }
       }
+      res.status(400).json({ error: "Could not calculate driving distance between these addresses/pins." });
+    } catch (fetchErr) {
+      clearTimeout(timeoutId);
+      return res.status(504).json({ error: "Google Maps API timed out. Distance unavailable." });
     }
-    res.status(400).json({ error: "Could not calculate driving distance between these addresses/pins." });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1061,10 +1073,11 @@ app.post("/api/shipping-quote", async (req, res) => {
 if (process.env.MONGO_URI) {
   mongoose
     .connect(process.env.MONGO_URI, { 
-      family: 4 // FORCE IPv4 TO FIX RENDER'S 3 MINUTE IPV6 DNS HANG
+      serverSelectionTimeoutMS: 5000, 
+      socketTimeoutMS: 45000 
     })
     .then(async () => {
-      console.log("✅ Connected to MongoDB Atlas via IPv4");
+      console.log("✅ Connected to MongoDB Atlas");
       await initializeDatabase();
     })
     .catch((err) => console.error("❌ MongoDB connection error:", err.message));
