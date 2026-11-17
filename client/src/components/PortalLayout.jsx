@@ -11,12 +11,9 @@ export default function PortalLayout({
   const isStaff = currentUser?.role === "admin" || currentUser?.role === "viewer";
   const isDriver = currentUser?.role === "driver";
 
-  // Enforce strict navigation locks based on user roles
   let navItems = [];
 
   if (isDriver) {
-    // FIXED: The "Messages" tab has been completely deleted for Drivers. 
-    // They will only see the "Driver Portal" tab and handle chats inline.
     navItems = [
       { id: "driver", label: "Driver Portal", icon: "🚚", badge: null }
     ];
@@ -30,6 +27,7 @@ export default function PortalLayout({
       }
     ];
   } else {
+    // NEW: Added the "account" tab to the main navigation
     navItems = [
       { id: "search", label: "Search", icon: "🔍", badge: null },
       { id: "messages", label: "Messages", icon: "💬", badge: counts.unreadMessages },
@@ -37,6 +35,7 @@ export default function PortalLayout({
       { id: "listings", label: "My Listings", icon: "📦", badge: counts.myListings },
       { id: "orders", label: "Orders & Ratings", icon: "⭐", badge: counts.orders },
       { id: "favourites", label: "Saved", icon: "❤️", badge: counts.favourites },
+      { id: "account", label: "Account", icon: "👤", badge: null },
       { id: "cart", label: "Cart", icon: "🛒", badge: counts.cart }
     ];
   }
