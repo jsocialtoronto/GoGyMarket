@@ -77,6 +77,12 @@ export default function App() {
   const [editingListing, setEditingListing] = useState(null);
   const [editFormData, setEditFormData] = useState({ title: "", description: "", price: "", stockCount: 1, isLocationMasked: true, isOversized: false, condition: "New" });
 
+  // NEW: State for Self-Password Reset
+  const [resetNewPassword, setResetNewPassword] = useState("");
+  const [resetConfirmPassword, setResetConfirmPassword] = useState("");
+  const [resetPasswordFeedback, setResetPasswordFeedback] = useState({ type: "", text: "" });
+  const [showAccountPassword, setShowAccountPassword] = useState(false);
+
   const loadMarketplaceData = async () => {
     try {
       setIsLoading(true);
@@ -101,10 +107,12 @@ export default function App() {
       }
 
       if (currentUser && !isStaff && !isDriver) {
-        const [ordersRes, ratingsRes] = await Promise.all([
+        const [ordersRes, ratingsRes, userRes] = await Promise.all([
           fetch(`${API_BASE}/api/orders/user/${currentUser.id}?t=${timestamp}`, { cache: "no-store" }),
-          fetch(`${API_BASE}/api/ratings?t=${timestamp}`, { cache: "no-store" })
+          fetch(`${API_BASE}/api/ratings?t=${timestamp}`, { cache: "no-store" }),
+          fetch(`${API_BASE}/api/users/${currentUser.id}?t=${timestamp}`, { cache: "no-store" }) // Fetch fresh credits
         ]);
+        
         if (ordersRes.ok) {
           const oData = await ordersRes.json();
           setMyOrders(Array.isArray(oData) ? oData : []);
@@ -112,6 +120,14 @@ export default function App() {
         if (ratingsRes.ok) {
           const rData = await ratingsRes.json();
           setAllRatings(Array.isArray(rData) ? rData : []);
+        }
+        if (userRes.ok) {
+          const uData = await userRes.json();
+          setCurrentUser(prev => {
+            const updated = { ...prev, credits: uData.credits || 0 };
+            localStorage.setItem("gogy_user", JSON.stringify(updated));
+            return updated;
+          });
         }
       }
     } catch (err) {
@@ -280,10 +296,36 @@ export default function App() {
     }
   };
 
+  const handleSelfPasswordReset = async (e) => {
+    e.preventDefault();
+    setResetPasswordFeedback({ type: "", text: "" });
+
+    try {
+      const res = await fetch(`${API_BASE}/api/users/${currentUser.id}/password`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newPassword: resetNewPassword })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update password");
+
+      setResetPasswordFeedback({ type: "success", text: "Password successfully updated!" });
+      setResetNewPassword("");
+      setResetConfirmPassword("");
+    } catch (err) {
+      setResetPasswordFeedback({ type: "error", text: err.message });
+    }
+  };
+
+  // CART CREDIT MATH
   const cartItemTotal = cart.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
   const cartDeliveryTotal = cart.reduce((sum, item) => sum + Number(item.shippingCost || 0), 0);
   const cartGrandTotal = cartItemTotal + cartDeliveryTotal;
   const hasDeliveryItems = cart.some((item) => item.deliveryMethod === "delivery");
+  
+  const availableCredits = currentUser?.credits || 0;
+  const creditsToApply = Math.min(availableCredits, cartGrandTotal);
+  const finalBalanceDue = cartGrandTotal - creditsToApply;
 
   const processStripeCheckout = async () => {
     setIsProcessingOrder(true);
@@ -301,7 +343,7 @@ export default function App() {
           items: cart,
           itemSubtotal: cartItemTotal,
           deliveryTotal: cartDeliveryTotal,
-          grandTotal: cartGrandTotal,
+          grandTotal: cartGrandTotal, 
         })
       });
 
@@ -315,6 +357,8 @@ export default function App() {
           orderId: savedOrder._id,
           items: cart,
           deliveryTotal: cartDeliveryTotal,
+          creditsApplied: creditsToApply,
+          balanceDue: finalBalanceDue,
           domain: window.location.origin
         })
       });
@@ -366,7 +410,9 @@ export default function App() {
         items: [...cart],
         itemSubtotal: cartItemTotal,
         deliveryTotal: cartDeliveryTotal,
-        grandTotal: cartGrandTotal
+        grandTotal: cartGrandTotal,
+        creditsApplied: savedOrder.creditsApplied,
+        balanceDue: savedOrder.balanceDue
       });
 
       setCart([]);
@@ -381,6 +427,13 @@ export default function App() {
 
   const handleCheckoutSubmit = () => {
     setCheckoutError("");
+    
+    // Automatically intercept if fully paid with credits
+    if (finalBalanceDue <= 0) {
+       finalizeOrder("store_credit", "Paid in Full with Account Credits");
+       return;
+    }
+    
     if (!hasDeliveryItems) {
       finalizeOrder("pickup", "Option 1: Local Pickup (Pay & Pickup with Seller)");
       return;
@@ -785,7 +838,6 @@ export default function App() {
 
                       return (
                         <div key={order._id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                          {/* DRIVER ORDER CARD HEADER WITH THUMBNAIL */}
                           <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                             <div className="flex items-center gap-3">
                                {headerImg ? (
@@ -897,13 +949,10 @@ export default function App() {
                                     
                                     return (
                                       <div key={`chat-${chatInfo.conv._id}`} className="mt-2 border border-slate-200 rounded-xl overflow-hidden bg-slate-50 flex flex-col h-[350px] animate-in fade-in slide-in-from-top-2">
-                                        
-                                        {/* DRIVER CHAT WINDOW HEADER (NO IMAGE HERE, JUST TEXT) */}
                                         <div className="bg-slate-900 text-white px-4 py-2.5 text-xs font-bold flex justify-between items-center shrink-0">
                                           <span className="truncate max-w-[200px]">Message {chatInfo.label} ({chatInfo.party})</span>
                                           <button onClick={() => setExpandedChatConvId(null)} className="hover:text-red-400">✕ Close</button>
                                         </div>
-                                        
                                         <div className="flex-1 overflow-y-auto p-4 space-y-4">
                                           {(Array.isArray(chatInfo.conv.messages) ? chatInfo.conv.messages : []).map((m, mIdx) => {
                                             if (!m || typeof m !== 'object') return null;
@@ -1237,7 +1286,10 @@ export default function App() {
                     <div className="bg-slate-900 text-white p-5 rounded-xl space-y-2">
                       <div className="flex justify-between text-sm text-slate-300"><span>Items Subtotal:</span><span>${completedOrder.itemSubtotal.toLocaleString()} GYD</span></div>
                       <div className="flex justify-between text-sm text-slate-300"><span>Delivery Charges:</span><span>${completedOrder.deliveryTotal.toLocaleString()} GYD</span></div>
-                      <div className="flex justify-between text-xl font-black text-emerald-400 pt-2 border-t border-slate-700"><span>Total Breakdown:</span><span>${completedOrder.grandTotal.toLocaleString()} GYD</span></div>
+                      {completedOrder.creditsApplied > 0 && (
+                        <div className="flex justify-between text-sm text-emerald-400 font-bold"><span>Account Credits Applied:</span><span>-${completedOrder.creditsApplied.toLocaleString()} GYD</span></div>
+                      )}
+                      <div className="flex justify-between text-xl font-black text-emerald-400 pt-2 border-t border-slate-700"><span>Total Due:</span><span>${completedOrder.balanceDue.toLocaleString()} GYD</span></div>
                     </div>
 
                     <div className="flex flex-col sm:flex-row gap-3 pt-2">
@@ -1268,7 +1320,7 @@ export default function App() {
                               </div>
                               <button onClick={() => setCashVerifyStep(false)} className="text-xs font-bold text-slate-500 hover:text-slate-800">← Back to Cart</button>
                             </div>
-                            <p className="text-sm text-slate-600 leading-relaxed">To submit your Cash Delivery order of <span className="font-bold text-slate-900">${cartGrandTotal.toLocaleString()} GYD</span>, place the cash inside your lockbox and upload a clear photo below.</p>
+                            <p className="text-sm text-slate-600 leading-relaxed">To submit your Cash Delivery order of <span className="font-bold text-slate-900">${finalBalanceDue.toLocaleString()} GYD</span>, place the cash inside your lockbox and upload a clear photo below.</p>
                             <div className="border-2 border-dashed border-slate-300 rounded-xl p-6 text-center bg-slate-50">
                               {lockboxPhoto ? (
                                 <div className="space-y-3">
@@ -1315,7 +1367,13 @@ export default function App() {
 
                       <div className="bg-white p-6 rounded-xl border border-slate-200 h-fit space-y-4 sticky top-24 shadow-sm">
                         <h3 className="font-bold text-lg text-slate-900 border-b border-slate-200 pb-3">Order & Payment Options</h3>
-                        {!hasDeliveryItems ? (
+                        
+                        {finalBalanceDue <= 0 ? (
+                          <div className="bg-emerald-50 border border-emerald-200 p-3.5 rounded-lg text-xs text-emerald-900 space-y-1">
+                            <p className="font-extrabold">Fully Covered by Credits</p>
+                            <p>Your account credit balance covers this entire purchase!</p>
+                          </div>
+                        ) : !hasDeliveryItems ? (
                           <div className="bg-emerald-50 border border-emerald-200 p-3.5 rounded-lg text-xs text-emerald-900 space-y-1">
                             <p className="font-extrabold">Option 1: Local Pickup Selected</p>
                             <p>You and the seller will coordinate pickup and payment directly in Messages.</p>
@@ -1341,12 +1399,21 @@ export default function App() {
                         <div className="space-y-2 pt-2 border-t border-slate-200">
                           <div className="flex justify-between text-sm text-slate-600"><span>Items Subtotal:</span><span className="font-medium text-slate-900">${cartItemTotal.toLocaleString()} GYD</span></div>
                           <div className="flex justify-between text-sm text-slate-600"><span>Delivery Fees:</span><span className="font-medium text-slate-900">${cartDeliveryTotal.toLocaleString()} GYD</span></div>
+                          {creditsToApply > 0 && (
+                            <div className="flex justify-between text-sm font-bold text-emerald-600"><span>Store Credit Applied:</span><span>-${creditsToApply.toLocaleString()} GYD</span></div>
+                          )}
                         </div>
-                        <div className="flex justify-between font-black text-xl text-emerald-700 border-t border-slate-200 pt-3"><span>Total:</span><span>${cartGrandTotal.toLocaleString()} GYD</span></div>
+                        <div className="flex justify-between font-black text-xl text-slate-900 border-t border-slate-200 pt-3">
+                          <span>Total Due:</span>
+                          <span className={finalBalanceDue <= 0 ? "text-emerald-500" : ""}>${finalBalanceDue.toLocaleString()} GYD</span>
+                        </div>
 
                         {checkoutError && <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-xs font-bold rounded-lg">⚠️ {checkoutError}</div>}
                         <button onClick={handleCheckoutSubmit} disabled={isProcessingOrder} className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white font-bold text-sm py-3.5 rounded-lg mt-2 shadow-md transition-colors">
-                          {isProcessingOrder ? "Processing Order..." : hasDeliveryItems && deliveryPaymentMethod === "cash" && !cashVerifyStep ? "Proceed to Cash Verification →" : "Confirm & Complete Purchase"}
+                          {isProcessingOrder ? "Processing Order..." 
+                           : finalBalanceDue <= 0 ? "Complete Order with Credits ✓"
+                           : hasDeliveryItems && deliveryPaymentMethod === "cash" && !cashVerifyStep ? "Proceed to Cash Verification →" 
+                           : "Confirm & Complete Purchase"}
                         </button>
                       </div>
                     </div>
@@ -1470,7 +1537,7 @@ export default function App() {
             </div>
           )}
 
-          {/* BUYER/SELLER MESSAGES TAB - BULLETPROOF RENDER WITH DYNAMIC THUMBNAIL/TITLE LOOKUP */}
+          {/* BUYER/SELLER MESSAGES TAB */}
           {!isDriver && activeTab === "messages" && (
             <div className="max-w-5xl mx-auto space-y-6">
               <div>
@@ -1636,6 +1703,68 @@ export default function App() {
                     </div>
                   )}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* NEW: USER ACCOUNT SETTINGS TAB */}
+          {activeTab === "account" && (
+            <div className="max-w-xl mx-auto space-y-6">
+              <div>
+                <h2 className="text-2xl font-bold text-slate-900">Account Settings</h2>
+                <p className="text-xs text-slate-500">Manage your profile, credits, and security.</p>
+              </div>
+
+              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-slate-700 uppercase tracking-wider text-xs">Available Store Credit</h3>
+                  <p className="text-4xl font-black text-emerald-700 mt-1">${(currentUser?.credits || 0).toLocaleString()} GYD</p>
+                  <p className="text-xs text-slate-500 mt-1 font-semibold">Credits are automatically applied to your next purchase.</p>
+                </div>
+                <div className="text-5xl opacity-80">💰</div>
+              </div>
+
+              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                <h3 className="font-bold text-slate-900 border-b border-slate-100 pb-3 mb-4">Change Password</h3>
+                <form onSubmit={handleSelfPasswordReset} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold uppercase text-slate-700 mb-1">New Password</label>
+                    <input 
+                      type={showAccountPassword ? "text" : "password"} 
+                      required 
+                      placeholder="Min 10 chars, 1 capital, letters & numbers"
+                      value={resetNewPassword} 
+                      onChange={e => setResetNewPassword(e.target.value)} 
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" 
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Confirm New Password</label>
+                    <input 
+                      type={showAccountPassword ? "text" : "password"} 
+                      required 
+                      placeholder="Re-type password"
+                      value={resetConfirmPassword} 
+                      onChange={e => setResetConfirmPassword(e.target.value)} 
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" 
+                    />
+                  </div>
+                  
+                  <label className="flex items-center gap-2 cursor-pointer mt-1 mb-2">
+                    <input type="checkbox" checked={showAccountPassword} onChange={(e) => setShowAccountPassword(e.target.checked)} className="accent-emerald-600" />
+                    <span className="text-xs font-bold text-slate-600">Show Password</span>
+                  </label>
+
+                  {resetPasswordFeedback.text && (
+                    <div className={`p-3 rounded-lg text-xs font-bold text-center border ${resetPasswordFeedback.type === 'error' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-800 border-emerald-200'}`}>
+                      {resetPasswordFeedback.type === 'error' ? "⚠️ " : "✅ "}{resetPasswordFeedback.text}
+                    </div>
+                  )}
+
+                  <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors">
+                    Update Password
+                  </button>
+                </form>
               </div>
             </div>
           )}
