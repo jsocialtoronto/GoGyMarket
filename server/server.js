@@ -8,6 +8,12 @@ require("dotenv").config();
 
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
+// TWILIO SETUP
+let twilioClient = null;
+if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+  twilioClient = require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+}
+
 const app = express();
 
 app.use(
@@ -27,6 +33,9 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: "15mb" }));
 
 const JWT_SECRET = process.env.JWT_SECRET || "gogy_super_secret_dev_key_2026";
+
+// MEMORY CACHE FOR SMS VERIFICATION CODES
+const otpCache = new Map();
 
 function validateStrictPassword(pw) {
   if (!pw || pw.length < 10) return "Password must be at least 10 characters long.";
@@ -53,7 +62,7 @@ const userSchema = new mongoose.Schema(
     averageRating: { type: Number, default: 0 },
     ratingCount: { type: Number, default: 0 },
     canPostListings: { type: Boolean, default: true },
-    credits: { type: Number, default: 0 } // NEW: Account Credits Balance
+    credits: { type: Number, default: 0 } 
   },
   { timestamps: true }
 );
@@ -177,8 +186,8 @@ const orderSchema = new mongoose.Schema(
     itemSubtotal: { type: Number, required: true, default: 0 },
     deliveryTotal: { type: Number, required: true, default: 0 },
     grandTotal: { type: Number, required: true, default: 0 },
-    creditsApplied: { type: Number, default: 0 }, // NEW: Track applied credits
-    balanceDue: { type: Number, default: 0 },     // NEW: Track remaining balance after credits
+    creditsApplied: { type: Number, default: 0 }, 
+    balanceDue: { type: Number, default: 0 },     
     lockboxPhoto: { type: String, default: null },
     verifiedBy: { type: String, default: null },
     verifiedAt: { type: Date, default: null }
@@ -278,7 +287,7 @@ async function sendOrderNotification({ listingId, listingTitle, buyerName, selle
 }
 
 // ==========================================
-// 3. API ROUTES
+// 3. API ROUTES (AUTH & OTP)
 // ==========================================
 
 app.get("/", (req, res) => res.send("GoGyMarket API is live."));
@@ -287,24 +296,71 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", dbConnected: mongoose.connection.readyState === 1 });
 });
 
+// NEW: Request SMS OTP and Validate Address Constraint
+app.post("/api/auth/send-otp", async (req, res) => {
+  try {
+    const { phone, email, location } = req.body;
+    if (!phone) return res.status(400).json({ error: "Phone number is required for verification." });
+
+    // 1. Strict 1:1 Address Check
+    if (location) {
+      const existingAddress = await User.findOne({ location: location.trim(), role: "user" });
+      if (existingAddress) {
+        return res.status(400).json({ error: "Registration Denied: An account is already registered at this household address. Limit is 1 account per address." });
+      }
+    }
+
+    // 2. Strict Phone/Email Check
+    const existingPhone = await User.findOne({ phone: phone.trim() });
+    if (existingPhone) return res.status(400).json({ error: "This phone number is already registered to an active account." });
+
+    if (email) {
+      const existingEmail = await User.findOne({ email: email.toLowerCase().trim() });
+      if (existingEmail) return res.status(400).json({ error: "This email address is already registered." });
+    }
+
+    // Generate 6 digit code
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    otpCache.set(phone, { code, expires: Date.now() + 10 * 60 * 1000 }); // Valid for 10 mins
+
+    if (twilioClient) {
+      await twilioClient.messages.create({
+        body: `Your GoGyMarket verification code is: ${code}`,
+        from: process.env.TWILIO_PHONE_NUMBER,
+        to: phone
+      });
+      console.log(`✅ Twilio SMS sent to ${phone}`);
+    } else {
+      console.log(`[DEV MODE] Twilio not configured. Verification code for ${phone} is: ${code}`);
+    }
+
+    res.json({ success: true, message: "Verification code sent." });
+  } catch (err) {
+    console.error("Twilio Error:", err);
+    res.status(500).json({ error: "Failed to send SMS code. Please check your phone number formatting." });
+  }
+});
+
 app.post("/api/auth/register", async (req, res) => {
   try {
-    const { accountType, firstName, lastName, businessName, contactMethod, password, location } = req.body;
+    const { accountType, firstName, lastName, businessName, contactMethod, verificationPhone, verificationCode, password, location } = req.body;
+    
+    // Validate Password
     const pwError = validateStrictPassword(password);
     if (pwError) return res.status(400).json({ error: pwError });
 
+    // Verify OTP
+    const cachedOtp = otpCache.get(verificationPhone);
+    if (!cachedOtp || cachedOtp.expires < Date.now() || cachedOtp.code !== verificationCode) {
+      return res.status(400).json({ error: "Invalid or expired verification code." });
+    }
+
     const isEmail = contactMethod.includes("@");
     const email = isEmail ? contactMethod.toLowerCase().trim() : undefined;
-    const phone = !isEmail ? contactMethod.trim() : undefined;
-
-    if (email) {
-      const existingUser = await User.findOne({ email });
-      if (existingUser) return res.status(400).json({ error: "This email is already registered." });
-    }
-    if (phone) {
-      const existingUser = await User.findOne({ phone });
-      if (existingUser) return res.status(400).json({ error: "This phone number is already registered." });
-    }
+    
+    // Double check constraints just in case of race condition
+    const existingAddress = await User.findOne({ location: location.trim(), role: "user" });
+    if (existingAddress) return res.status(400).json({ error: "Registration Denied: An account is already registered at this address." });
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
@@ -315,12 +371,14 @@ app.post("/api/auth/register", async (req, res) => {
       role: "user",
       name: displayName,
       email,
-      phone,
+      phone: verificationPhone,
       password: hashedPassword,
-      location: location || "Toronto, ON",
+      location: location.trim(),
       canPostListings: true,
       credits: 0
     });
+
+    otpCache.delete(verificationPhone); // Clear cache after success
 
     const token = jwt.sign({ id: newUser._id, role: newUser.role }, JWT_SECRET, { expiresIn: "7d" });
 
@@ -359,7 +417,6 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// Fetch current user details (used to refresh credits)
 app.get("/api/users/:id", async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select("-password");
@@ -370,7 +427,6 @@ app.get("/api/users/:id", async (req, res) => {
   }
 });
 
-// Self-Service Password Reset
 app.patch("/api/users/:id/password", async (req, res) => {
   try {
     const { newPassword } = req.body;
@@ -401,7 +457,6 @@ app.post("/api/orders", async (req, res) => {
 
     if (!items || items.length === 0) return res.status(400).json({ error: "Cart cannot be empty." });
 
-    // DEDUCT ACCOUNT CREDITS AUTOMATICALLY
     const buyer = await User.findById(buyerId);
     let appliedCredits = 0;
     let finalBalanceDue = Number(grandTotal || 0);
@@ -518,7 +573,6 @@ app.post("/api/create-checkout-session", async (req, res) => {
 
     let lineItems = [];
 
-    // If credits were used but a balance remains, send a single custom line item so Stripe handles the math cleanly
     if (creditsApplied > 0 && balanceDue > 0) {
       lineItems = [{
         price_data: {
@@ -698,8 +752,8 @@ app.get("/api/admin/stats", verifyStaff, async (req, res) => {
     });
 
     const sortedPayments = Object.entries(paymentCounts).sort((a, b) => b[1] - a[1]);
-    const paymentLabels = { cash: "Cash in Lockbox", etransfer: "eTransfer", credit: "Credit Card" };
-    const mostPopularPayment = sortedPayments[0][1] > 0 ? paymentLabels[sortedPayments[0][0]] : "No Delivery Payments Yet";
+    const paymentLabels = { cash: "Cash in Lockbox", etransfer: "eTransfer", credit: "Credit Card", store_credit: "Store Credit" };
+    const mostPopularPayment = sortedPayments[0] && sortedPayments[0][1] > 0 ? paymentLabels[sortedPayments[0][0]] : "No Delivery Payments Yet";
 
     res.json({
       totalListings: listings.length, totalOrders: orders.length, totalRatings: ratings.length,
@@ -813,7 +867,6 @@ app.post("/api/admin/users", verifyStaff, requireFullAdmin, async (req, res) => 
   }
 });
 
-// ADMIN: ADD ACCOUNT CREDITS
 app.patch("/api/admin/users/:id/credits", verifyStaff, requireFullAdmin, async (req, res) => {
   try {
     const { amount } = req.body;
