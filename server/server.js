@@ -92,6 +92,7 @@ const listingSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+listingSchema.index({ createdAt: -1 });
 const Listing = mongoose.model("Listing", listingSchema);
 
 const conversationSchema = new mongoose.Schema(
@@ -112,6 +113,7 @@ const conversationSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+conversationSchema.index({ updatedAt: -1 });
 const Conversation = mongoose.model("Conversation", conversationSchema);
 
 const orderSchema = new mongoose.Schema(
@@ -157,6 +159,9 @@ const orderSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+// CRITICAL INDEX: Prevents MongoDB from running out of RAM when sorting orders
+orderSchema.index({ createdAt: -1 });
+orderSchema.index({ dispatchStatus: 1, status: 1, createdAt: -1 });
 const Order = mongoose.model("Order", orderSchema);
 
 const ratingSchema = new mongoose.Schema(
@@ -176,8 +181,38 @@ const ratingSchema = new mongoose.Schema(
 );
 const Rating = mongoose.model("Rating", ratingSchema);
 
+// ==========================================
+// HELPER: Re-attach lightweight thumbnails to Orders
+// ==========================================
+async function hydrateOrderThumbnails(orders) {
+  if (!Array.isArray(orders) || orders.length === 0) return [];
+  const listings = await Listing.find().select("_id title images").lean();
+  const imageMap = {};
+  for (const l of listings) {
+    if (l.images && l.images[0]) {
+      imageMap[String(l._id)] = l.images[0];
+      if (l.title) imageMap[l.title.trim().toLowerCase()] = l.images[0];
+    }
+  }
+  return orders.map((order) => ({
+    ...order,
+    items: (order.items || []).map((item) => ({
+      ...item,
+      image:
+        item.image ||
+        imageMap[String(item.listingId)] ||
+        (item.title ? imageMap[item.title.trim().toLowerCase()] : "") ||
+        ""
+    }))
+  }));
+}
+
 async function initializeDatabase() {
   try {
+    // Sync indexes so sorting never hits the 32MB memory limit
+    await Order.syncIndexes();
+    await Listing.syncIndexes();
+
     const masterEmail = "admin@gogymarket.com";
     const existingAdmin = await User.findOne({ email: masterEmail });
     if (!existingAdmin) {
@@ -412,12 +447,13 @@ app.post("/api/orders", async (req, res) => {
       }
     }
 
+    // Do NOT duplicate massive Base64 images inside Order documents; hydrate dynamically from Listing
     const formattedItems = items.map((i) => ({
       listingId: i._id || i.listingId, title: i.title, sellerId: i.sellerId, sellerName: i.sellerName,
       sellerLocation: i.location || i.sellerLocation || "", quantity: Number(i.quantity || 1), unitPrice: Number(i.price || i.unitPrice || 0),
       shippingCost: Number(i.shippingCost || 0), deliveryMethod: i.deliveryMethod || "pickup", buyerLocationType: i.buyerLocationType || "address",
       buyerAddress: i.buyerAddress || "", buyerPin: i.buyerPin || "", specialInstructions: i.specialInstructions || "",
-      isOversized: i.isOversized || false, image: i.images?.[0] || i.image || ""
+      isOversized: i.isOversized || false, image: ""
     }));
 
     const newOrder = await Order.create({
@@ -502,14 +538,15 @@ app.post("/api/orders/confirm-stripe", async (req, res) => {
   }
 });
 
-// FAST QUERY: Excludes multi-megabyte lockboxPhoto from user order list
+// FAST USER ORDERS: Excludes heavy Base64 strings during DB sort, then attaches listing thumbnails
 app.get("/api/orders/user/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
-    const orders = await Order.find({ $or: [{ buyerId: userId }, { "items.sellerId": userId }] })
-      .select("-lockboxPhoto")
+    const rawOrders = await Order.find({ $or: [{ buyerId: userId }, { "items.sellerId": userId }] })
+      .select("-lockboxPhoto -items.image")
       .sort({ createdAt: -1 })
       .lean();
+    const orders = await hydrateOrderThumbnails(rawOrders);
     res.json(orders);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -531,7 +568,7 @@ app.post("/api/ratings", async (req, res) => {
     if (!stars || stars < 1 || stars > 5) return res.status(400).json({ error: "Please select a star rating between 1 and 5." });
     if (!comment || !comment.trim()) return res.status(400).json({ error: "Please write a comment for your review." });
 
-    const order = await Order.findById(orderId).select("-lockboxPhoto").lean();
+    const order = await Order.findById(orderId).select("-lockboxPhoto -items.image").lean();
     if (!order) return res.status(404).json({ error: "Order not found." });
     if (order.status !== "active") return res.status(400).json({ error: "Ratings can only be submitted after payment has been verified." });
     if (String(order.buyerId) !== String(raterId)) return res.status(400).json({ error: "Only the Buyer can leave a rating for this transaction." });
@@ -563,7 +600,6 @@ app.post("/api/ratings", async (req, res) => {
 // 5. ADMINISTRATION PORTAL & ANALYTICS ROUTES
 // ==========================================
 
-// FAST STATS: Excludes all Base64 images when calculating platform stats
 app.get("/api/admin/stats", verifyStaff, async (req, res) => {
   try {
     const [listings, orders, ratingsCount] = await Promise.all([
@@ -607,17 +643,20 @@ app.get("/api/admin/stats", verifyStaff, async (req, res) => {
   }
 });
 
-// FAST ADMIN ORDERS: Strips heavy lockboxPhoto Base64 out of the list view
+// FAST ADMIN ORDERS: Excludes Base64 strings from sort, then attaches thumbnails
 app.get("/api/admin/orders", verifyStaff, async (req, res) => {
   try {
-    const orders = await Order.find().select("-lockboxPhoto").sort({ createdAt: -1 }).lean();
+    const rawOrders = await Order.find()
+      .select("-lockboxPhoto -items.image")
+      .sort({ createdAt: -1 })
+      .lean();
+    const orders = await hydrateOrderThumbnails(rawOrders);
     res.json(orders);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ON-DEMAND PHOTO FETCH: Loads a single lockbox photo only when Admin clicks to view it
 app.get("/api/admin/orders/:id/lockbox-photo", verifyStaff, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id).select("lockboxPhoto").lean();
@@ -630,7 +669,7 @@ app.get("/api/admin/orders/:id/lockbox-photo", verifyStaff, async (req, res) => 
 
 app.patch("/api/admin/orders/:id/verify", verifyStaff, requireFullAdmin, async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id);
+    const order = await Order.findById(req.params.id).select("-lockboxPhoto -items.image");
     if (!order) return res.status(404).json({ error: "Order not found." });
     if (order.status !== "waiting_etransfer" && order.status !== "waiting_cash") return res.status(400).json({ error: "Only pending eTransfer or Cash orders require manual verification." });
 
@@ -644,7 +683,8 @@ app.patch("/api/admin/orders/:id/verify", verifyStaff, requireFullAdmin, async (
         text: `✅ PAYMENT VERIFIED BY ADMIN (${previousType})\nOrder: ${order.orderNumber}\nItem: ${item.quantity}x ${item.title}\n\n🔔 Notification to Seller (${item.sellerName}): Payment has been verified by GoGyMarket Admin. Your item is now ACTIVE and ready for delivery pickup! The Buyer can now rate this transaction.`
       });
     }
-    res.json(order);
+    const [hydrated] = await hydrateOrderThumbnails([order.toObject()]);
+    res.json(hydrated);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -652,7 +692,7 @@ app.patch("/api/admin/orders/:id/verify", verifyStaff, requireFullAdmin, async (
 
 app.patch("/api/admin/orders/:id/cancel", verifyStaff, requireFullAdmin, async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id);
+    const order = await Order.findById(req.params.id).select("-lockboxPhoto -items.image");
     if (!order) return res.status(404).json({ error: "Order not found." });
     if (order.status === "cancelled") return res.status(400).json({ error: "Order is already cancelled." });
 
@@ -673,7 +713,8 @@ app.patch("/api/admin/orders/:id/cancel", verifyStaff, requireFullAdmin, async (
     order.status = "cancelled"; if (order.dispatchStatus === "pending") order.dispatchStatus = "N/A";
     order.verifiedBy = req.staffUser.name; order.verifiedAt = new Date();
     await order.save();
-    res.json(order);
+    const [hydrated] = await hydrateOrderThumbnails([order.toObject()]);
+    res.json(hydrated);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -780,15 +821,17 @@ app.delete("/api/admin/emergency-clear-listings", verifyStaff, requireFullAdmin,
 // 6. DRIVER API ROUTES
 // ==========================================
 
+// FAST DRIVER ORDERS: Excludes Base64 strings from sort, then attaches thumbnails
 app.get("/api/driver/orders", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver" && req.staffUser.role !== "admin") return res.status(403).json({ error: "Driver or Admin access required." });
-    const orders = await Order.find({ dispatchStatus: { $in: ["pending", "active", "completed"] }, status: { $in: ["active", "cancelled"] } })
-      .select("-lockboxPhoto")
+    const rawOrders = await Order.find({ dispatchStatus: { $in: ["pending", "active", "completed"] }, status: { $in: ["active", "cancelled"] } })
+      .select("-lockboxPhoto -items.image")
       .sort({ createdAt: -1 })
       .lean();
-    const filteredOrders = req.staffUser.role === "admin" ? orders : orders.filter(o => o.dispatchStatus === "pending" || String(o.driverId) === String(req.staffUser._id));
-    res.json(filteredOrders);
+    const filteredOrders = req.staffUser.role === "admin" ? rawOrders : rawOrders.filter(o => o.dispatchStatus === "pending" || String(o.driverId) === String(req.staffUser._id));
+    const hydrated = await hydrateOrderThumbnails(filteredOrders);
+    res.json(hydrated);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -797,7 +840,7 @@ app.get("/api/driver/orders", verifyStaff, async (req, res) => {
 app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can accept delivery requests." });
-    const order = await Order.findById(req.params.id);
+    const order = await Order.findById(req.params.id).select("-lockboxPhoto -items.image");
     if (!order) return res.status(404).json({ error: "Order not found." });
     if (order.status === "cancelled") return res.status(400).json({ error: "Order has been cancelled." });
     if (order.dispatchStatus !== "pending") return res.status(400).json({ error: "This delivery is already active or completed." });
@@ -834,7 +877,8 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
         await pickupConv.save();
       }
     }
-    res.json(order);
+    const [hydrated] = await hydrateOrderThumbnails([order.toObject()]);
+    res.json(hydrated);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -843,7 +887,7 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
 app.patch("/api/driver/orders/:id/cancel-assignment", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can cancel their assignment." });
-    const order = await Order.findById(req.params.id);
+    const order = await Order.findById(req.params.id).select("-lockboxPhoto -items.image");
     if (!order) return res.status(404).json({ error: "Order not found." });
     if (String(order.driverId) !== String(req.staffUser._id)) return res.status(403).json({ error: "You are not assigned to this delivery." });
     if (order.dispatchStatus !== "active") return res.status(400).json({ error: "This delivery is not currently active." });
@@ -862,7 +906,8 @@ app.patch("/api/driver/orders/:id/cancel-assignment", verifyStaff, async (req, r
         await c.save();
       }
     }
-    res.json(order);
+    const [hydrated] = await hydrateOrderThumbnails([order.toObject()]);
+    res.json(hydrated);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -871,7 +916,7 @@ app.patch("/api/driver/orders/:id/cancel-assignment", verifyStaff, async (req, r
 app.patch("/api/driver/orders/:id/complete", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can complete delivery requests." });
-    const order = await Order.findById(req.params.id);
+    const order = await Order.findById(req.params.id).select("-lockboxPhoto -items.image");
     if (!order) return res.status(404).json({ error: "Order not found." });
     if (String(order.driverId) !== String(req.staffUser._id)) return res.status(403).json({ error: "You are not assigned to this delivery." });
     if (order.dispatchStatus !== "active") return res.status(400).json({ error: "This delivery is not currently active." });
@@ -890,7 +935,8 @@ app.patch("/api/driver/orders/:id/complete", verifyStaff, async (req, res) => {
         await c.save();
       }
     }
-    res.json(order);
+    const [hydrated] = await hydrateOrderThumbnails([order.toObject()]);
+    res.json(hydrated);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
