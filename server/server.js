@@ -16,6 +16,9 @@ if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
 
 const app = express();
 
+// GLOBALLY DISABLE INFINITE HANGING
+mongoose.set('bufferCommands', false);
+
 app.use(
   cors({
     origin: true,
@@ -285,6 +288,16 @@ async function sendOrderNotification({ listingId, listingTitle, buyerName, selle
   }
   return conv;
 }
+
+// ==========================================
+// FAIL-FAST DATABASE CHECKER
+// ==========================================
+app.use('/api', (req, res, next) => {
+  if (mongoose.connection.readyState === 0) {
+    return res.status(503).json({ error: "DATABASE_DISCONNECTED: The server has lost connection to MongoDB Atlas. Please check Render environment variables." });
+  }
+  next();
+});
 
 // ==========================================
 // 3. API ROUTES (AUTH & OTP)
@@ -1275,7 +1288,7 @@ async function formatWaypoint(inputStr) {
 
   const placeMatch = urlToTest.match(/\/place\/([^\/]+)/);
   if (placeMatch) {
-    let decoded = decodeURIComponent(placeMatch[1]).replace(/\+/g, "Uppercase", " ");
+    let decoded = decodeURIComponent(placeMatch[1]).replace(/\+/g, " ");
     if (decoded.includes("@")) decoded = decoded.split("@")[0];
     return { address: decoded };
   }
@@ -1330,10 +1343,9 @@ app.post("/api/shipping-quote", async (req, res) => {
 // 8. DATABASE CONNECTION & SERVER START
 // ==========================================
 if (process.env.MONGO_URI) {
-  mongoose.set('bufferCommands', false); // NEW: Force failure if disconnected from DB so app does not hang forever.
   mongoose
     .connect(process.env.MONGO_URI, { 
-      serverSelectionTimeoutMS: 5000, // Time out fast if IP is blocked
+      serverSelectionTimeoutMS: 5000, 
       socketTimeoutMS: 45000 
     })
     .then(async () => {
@@ -1341,6 +1353,8 @@ if (process.env.MONGO_URI) {
       await initializeDatabase();
     })
     .catch((err) => console.error("❌ MongoDB connection error:", err.message));
+} else {
+  console.error("❌ CRITICAL ERROR: MONGO_URI environment variable is missing!");
 }
 
 const PORT = process.env.PORT || 5000;
