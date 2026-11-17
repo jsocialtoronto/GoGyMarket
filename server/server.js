@@ -1,5 +1,4 @@
 // server/server.js
-// FIX: Force Node 18+ to use IPv4 first to prevent the 3-minute MongoDB Atlas DNS hang
 const dns = require('node:dns');
 dns.setDefaultResultOrder('ipv4first');
 
@@ -48,6 +47,10 @@ function validateStrictPassword(pw) {
   }
   return null;
 }
+
+// ==========================================
+// 1. MONGOOSE SCHEMAS & MODELS
+// ==========================================
 
 const userSchema = new mongoose.Schema(
   {
@@ -1074,7 +1077,8 @@ if (process.env.MONGO_URI) {
   mongoose
     .connect(process.env.MONGO_URI, { 
       serverSelectionTimeoutMS: 5000, 
-      socketTimeoutMS: 45000 
+      socketTimeoutMS: 45000,
+      family: 4 
     })
     .then(async () => {
       console.log("✅ Connected to MongoDB Atlas");
