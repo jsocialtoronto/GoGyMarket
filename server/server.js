@@ -1275,7 +1275,7 @@ async function formatWaypoint(inputStr) {
 
   const placeMatch = urlToTest.match(/\/place\/([^\/]+)/);
   if (placeMatch) {
-    let decoded = decodeURIComponent(placeMatch[1]).replace(/\+/g, " ");
+    let decoded = decodeURIComponent(placeMatch[1]).replace(/\+/g, "Uppercase", " ");
     if (decoded.includes("@")) decoded = decoded.split("@")[0];
     return { address: decoded };
   }
@@ -1330,8 +1330,12 @@ app.post("/api/shipping-quote", async (req, res) => {
 // 8. DATABASE CONNECTION & SERVER START
 // ==========================================
 if (process.env.MONGO_URI) {
+  mongoose.set('bufferCommands', false); // NEW: Force failure if disconnected from DB so app does not hang forever.
   mongoose
-    .connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 8000 })
+    .connect(process.env.MONGO_URI, { 
+      serverSelectionTimeoutMS: 5000, // Time out fast if IP is blocked
+      socketTimeoutMS: 45000 
+    })
     .then(async () => {
       console.log("✅ Connected to MongoDB Atlas");
       await initializeDatabase();
