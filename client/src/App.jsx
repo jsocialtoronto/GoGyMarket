@@ -77,7 +77,6 @@ export default function App() {
   const [editingListing, setEditingListing] = useState(null);
   const [editFormData, setEditFormData] = useState({ title: "", description: "", price: "", stockCount: 1, isLocationMasked: true, isOversized: false, condition: "New" });
 
-  // NEW: State for Self-Password Reset
   const [resetNewPassword, setResetNewPassword] = useState("");
   const [resetConfirmPassword, setResetConfirmPassword] = useState("");
   const [resetPasswordFeedback, setResetPasswordFeedback] = useState({ type: "", text: "" });
@@ -110,7 +109,7 @@ export default function App() {
         const [ordersRes, ratingsRes, userRes] = await Promise.all([
           fetch(`${API_BASE}/api/orders/user/${currentUser.id}?t=${timestamp}`, { cache: "no-store" }),
           fetch(`${API_BASE}/api/ratings?t=${timestamp}`, { cache: "no-store" }),
-          fetch(`${API_BASE}/api/users/${currentUser.id}?t=${timestamp}`, { cache: "no-store" }) // Fetch fresh credits
+          fetch(`${API_BASE}/api/users/${currentUser.id}?t=${timestamp}`, { cache: "no-store" })
         ]);
         
         if (ordersRes.ok) {
@@ -123,7 +122,9 @@ export default function App() {
         }
         if (userRes.ok) {
           const uData = await userRes.json();
+          // FIXED: Prevents the infinite re-render loop by aborting if credits match exactly
           setCurrentUser(prev => {
+            if (!prev || prev.credits === (uData.credits || 0)) return prev;
             const updated = { ...prev, credits: uData.credits || 0 };
             localStorage.setItem("gogy_user", JSON.stringify(updated));
             return updated;
@@ -166,6 +167,17 @@ export default function App() {
     }
   };
 
+  // FIXED: Dependency array strictly tracks ID to kill the infinite loading loop
+  useEffect(() => {
+    if (currentUser?.id) {
+      if (currentUser.role === "driver") {
+        loadDriverData();
+      } else {
+        loadMarketplaceData();
+      }
+    }
+  }, [currentUser?.id]);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sessionId = params.get("session_id");
@@ -197,16 +209,6 @@ export default function App() {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
-
-  useEffect(() => {
-    if (currentUser) {
-      if (isDriver) {
-        loadDriverData();
-      } else {
-        loadMarketplaceData();
-      }
-    }
-  }, [currentUser]);
 
   useEffect(() => {
     localStorage.setItem("gogy_favs", JSON.stringify(favouriteIds));
@@ -317,7 +319,6 @@ export default function App() {
     }
   };
 
-  // CART CREDIT MATH
   const cartItemTotal = cart.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
   const cartDeliveryTotal = cart.reduce((sum, item) => sum + Number(item.shippingCost || 0), 0);
   const cartGrandTotal = cartItemTotal + cartDeliveryTotal;
@@ -428,7 +429,6 @@ export default function App() {
   const handleCheckoutSubmit = () => {
     setCheckoutError("");
     
-    // Automatically intercept if fully paid with credits
     if (finalBalanceDue <= 0) {
        finalizeOrder("store_credit", "Paid in Full with Account Credits");
        return;
@@ -949,10 +949,12 @@ export default function App() {
                                     
                                     return (
                                       <div key={`chat-${chatInfo.conv._id}`} className="mt-2 border border-slate-200 rounded-xl overflow-hidden bg-slate-50 flex flex-col h-[350px] animate-in fade-in slide-in-from-top-2">
+                                        
                                         <div className="bg-slate-900 text-white px-4 py-2.5 text-xs font-bold flex justify-between items-center shrink-0">
                                           <span className="truncate max-w-[200px]">Message {chatInfo.label} ({chatInfo.party})</span>
                                           <button onClick={() => setExpandedChatConvId(null)} className="hover:text-red-400">✕ Close</button>
                                         </div>
+                                        
                                         <div className="flex-1 overflow-y-auto p-4 space-y-4">
                                           {(Array.isArray(chatInfo.conv.messages) ? chatInfo.conv.messages : []).map((m, mIdx) => {
                                             if (!m || typeof m !== 'object') return null;
@@ -1707,7 +1709,7 @@ export default function App() {
             </div>
           )}
 
-          {/* NEW: USER ACCOUNT SETTINGS TAB */}
+          {/* USER ACCOUNT SETTINGS TAB */}
           {activeTab === "account" && (
             <div className="max-w-xl mx-auto space-y-6">
               <div>
