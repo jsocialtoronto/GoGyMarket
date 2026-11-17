@@ -14,6 +14,7 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
   const [previewPhoto, setPreviewPhoto] = useState(null);
+  const [loadingPhotoOrderId, setLoadingPhotoOrderId] = useState(null);
   
   const [showDevSettings, setShowDevSettings] = useState(false);
 
@@ -32,7 +33,6 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
   const [resetConfirmPassword, setResetConfirmPassword] = useState("");
   const [showResetPassword, setShowResetPassword] = useState(false);
   
-  // NEW: State for adding credits
   const [creditAmounts, setCreditAmounts] = useState({});
 
   const [feedback, setFeedback] = useState({ type: "", text: "" });
@@ -41,18 +41,31 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
     try {
       setIsLoading(true);
       const headers = { Authorization: `Bearer ${token}` };
-      const [ordersRes, usersRes, statsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/admin/orders`, { headers }),
-        fetch(`${API_BASE}/api/admin/users`, { headers }),
-        fetch(`${API_BASE}/api/admin/stats`, { headers })
+      const timestamp = Date.now();
+
+      // 1. Load transactions FIRST and immediately unblock the UI
+      const ordersRes = await fetch(`${API_BASE}/api/admin/orders?t=${timestamp}`, { headers, cache: "no-store" });
+      if (ordersRes.ok) {
+        const oData = await ordersRes.json();
+        setOrders(Array.isArray(oData) ? oData : []);
+      }
+      setIsLoading(false);
+
+      // 2. Load users and stats in the background without blocking Transactions
+      const [usersRes, statsRes] = await Promise.all([
+        fetch(`${API_BASE}/api/admin/users?t=${timestamp}`, { headers, cache: "no-store" }),
+        fetch(`${API_BASE}/api/admin/stats?t=${timestamp}`, { headers, cache: "no-store" })
       ]);
 
-      if (ordersRes.ok) setOrders(await ordersRes.json());
-      if (usersRes.ok) setUsers(await usersRes.json());
-      if (statsRes.ok) setStats(await statsRes.json());
+      if (usersRes.ok) {
+        const uData = await usersRes.json();
+        setUsers(Array.isArray(uData) ? uData : []);
+      }
+      if (statsRes.ok) {
+        setStats(await statsRes.json());
+      }
     } catch (err) {
       console.error("Failed to load admin data:", err);
-    } finally {
       setIsLoading(false);
     }
   };
@@ -60,6 +73,26 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
   useEffect(() => {
     fetchAdminData();
   }, []);
+
+  const handleViewLockboxPhoto = async (order) => {
+    if (order.lockboxPhoto) {
+      setPreviewPhoto(order.lockboxPhoto);
+      return;
+    }
+    try {
+      setLoadingPhotoOrderId(order._id);
+      const res = await fetch(`${API_BASE}/api/admin/orders/${order._id}/lockbox-photo`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load photo");
+      setPreviewPhoto(data.lockboxPhoto);
+    } catch (err) {
+      setFeedback({ type: "error", text: err.message });
+    } finally {
+      setLoadingPhotoOrderId(null);
+    }
+  };
 
   const validatePasswordRules = (pw, confirmPw) => {
     if (pw.length < 10) return "Password must be at least 10 characters long.";
@@ -167,7 +200,446 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
     }
   };
 
-  // ADMIN: Handle adding credits to a user
+  const handleAddCredit = async (userId) => {
+    if (!isFullAdmin) return;
+    const amount = Number(creditAmounts[userId] || 0);
+    if (amount <= 0) return;
+
+    setFeedback({ type: "", text: "" });
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/users/${userId}/credits`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ amount })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to add credits");
+
+      setUsers((prev) => prev.map((u) => u._id === userId ? { ...u, credits: data.user.credits } : u));
+      setCreditAmounts(prev => ({ ...prev, [userId]: "" }));
+      setFeedback({ type: "success", text: data.message });
+    } catch (err) {
+      setFeedback({ type: "error", text: err.message });
+    }
+  };
+
+  const handleDeleteUser = async (userObj) => {
+    if (!isFullAdmin) return;
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently delete the account for "${userObj.name}" (${userObj.role})? Any listings posted by this user will also be removed.`
+    );
+    if (!confirmed) return;
+
+    setFeedback({ type: "", text: "" });
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/users/${userObj._id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+         throw new Error("Backend route not found. Please ensure Render has finished deploying.");
+      }
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to delete user");
+
+      setUsers((prev) => prev.filter((u) => u._id !== userObj._id));
+      setFeedback({ type: "success", text: `Deleted account for ${userObj.name}.` });
+      if (onOrdersUpdated) onOrdersUpdated();
+    } catch (err) {
+      setFeedback({ type: "error", text: err.message });
+    }
+  };
+
+  const handleResetPasswordSubmit = async (e) => {
+    e.preventDefault();
+    if (!isFullAdmin || !resetTargetUser) return;
+    setFeedback({ type: "", text: "" });
+
+    const pwErr = validatePasswordRules(resetPassword, resetConfirmPassword);
+    if (pwErr) return setFeedback({ type: "error", text: pwErr });
+
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/users/${resetTargetUser._id}/reset-password`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ newPassword: resetPassword })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to reset password");
+
+      setFeedback({ type: "success", text: data.message });
+      setResetTargetUser(null);
+      setResetPassword("");
+      setResetConfirmPassword("");
+    } catch (err) {
+      setFeedback({ type: "error", text: err.message });
+    }
+  };
+
+  const handleTogglePosting = async (userObj) => {
+    if (!isFullAdmin) return;
+    setFeedback({ type: "", text: "" });
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/users/${userObj._id}/toggle-posting`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update posting permissions");
+
+      setUsers((prev) => prev.map((u) => u._id === userObj._id ? { ...u, canPostListings: data.canPostListings } : u));
+      setFeedback({ type: "success", text: data.message });
+    } catch (err) {
+      setFeedback({ type: "error", text: err.message });
+    }
+  };
+
+  const handleEmergencyWipe = async () => {
+    if (!isFullAdmin) return;
+    const confirmed = window.confirm(
+      "🚨 CRITICAL WARNING: This will permanently delete EVERY listing in the database to clear out oversized image payloads causing the app to crash. This cannot be undone. Are you sure?"
+    );
+    if (!confirmed) return;
+
+    setFeedback({ type: "", text: "" });
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/emergency-clear-listings`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to wipe database");
+
+      setFeedback({ type: "success", text: data.message });
+      fetchAdminData();
+      if (onOrdersUpdated) onOrdersUpdated();
+      setShowDevSettings(false); 
+    } catch (err) {
+      setFeedback({ type: "error", text: err.message });
+    }
+  };
+
+  const getStatusBadge = (status, paymentMethod) => {
+    switch (status) {
+      case "waiting_etransfer":
+        return <span className="bg-amber-100 text-amber-800 border border-amber-300 text-xs font-extrabold px-2.5 py-1 rounded-full">⏳ Waiting on Payment for eTransfer</span>;
+      case "waiting_cash":
+        return <span className="bg-blue-100 text-blue-800 border border-blue-300 text-xs font-extrabold px-2.5 py-1 rounded-full">📸 Waiting on Confirmation of Cash</span>;
+      case "pending_payment":
+        return <span className="bg-orange-100 text-orange-800 border border-orange-300 text-xs font-extrabold px-2.5 py-1 rounded-full">💳 Incomplete Checkout (Stripe)</span>;
+      case "active":
+        return <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-extrabold px-2.5 py-1 rounded-full">✅ Active & Paid {paymentMethod === "credit" ? "(Stripe Auto)" : paymentMethod === "store_credit" ? "(Store Credit)" : "(Admin Verified)"}</span>;
+      case "pickup_pending":
+        return <span className="bg-slate-100 text-slate-700 border border-slate-300 text-xs font-bold px-2.5 py-1 rounded-full">🤝 Local Pickup (Buyer & Seller)</span>;
+      case "cancelled":
+        return <span className="bg-red-100 text-red-700 border border-red-300 text-xs font-extrabold px-2.5 py-1 rounded-full">❌ Cancelled</span>;
+      default:
+        return null;
+    }
+  };
+
+  const filteredOrders = orders.filter((o) => statusFilter === "all" ? true : o.status === statusFilter);
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-slate-900 text-white p-5 rounded-xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 shadow-sm">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-xl">🛡️</span>
+            <h2 className="text-xl font-black">GoGyMarket Administration</h2>
+            <span className={`text-xs font-black uppercase px-2.5 py-0.5 rounded-full ${isFullAdmin ? "bg-emerald-500 text-slate-950" : "bg-amber-400 text-slate-950"}`}>
+              {isFullAdmin ? "Full Admin Access" : "Viewer Mode (Read-Only)"}
+            </span>
+          </div>
+          <p className="text-xs text-slate-400 mt-1">
+            {isFullAdmin
+              ? "Manage transactions, view marketplace analytics, create or delete Buyer/Seller/Driver/Admin/Viewer accounts, and reset passwords."
+              : "Read-only Viewer console. You can inspect transactions, analytics, and accounts, but cannot make changes."}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {isFullAdmin && (
+            <div className="flex items-center gap-3 bg-slate-800 px-3 py-2 rounded-lg border border-slate-700 mr-2">
+               <label className="flex items-center gap-2 text-xs font-bold text-slate-300 cursor-pointer hover:text-white">
+                 <input 
+                   type="checkbox" 
+                   checked={showDevSettings} 
+                   onChange={(e) => setShowDevSettings(e.target.checked)} 
+                   className="w-3.5 h-3.5 accent-red-500"
+                 />
+                 Developer Settings
+               </label>
+               {showDevSettings && (
+                 <button
+                   onClick={handleEmergencyWipe}
+                   className="px-3 py-1 rounded text-xs font-bold bg-red-600 hover:bg-red-500 text-white shadow-sm border border-red-700 animate-in fade-in"
+                 >
+                   🚨 Wipe All Listings
+                 </button>
+               )}
+            </div>
+          )}
+
+          <button
+            onClick={() => setActiveSubTab("transactions")}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${activeSubTab === "transactions" ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}
+          >
+            💳 Transactions ({orders.length})
+          </button>
+          <button
+            onClick={() => setActiveSubTab("analytics")}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${activeSubTab === "analytics" ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}
+          >
+            📊 Marketplace Stats
+          </button>
+          <button
+            onClick={() => setActiveSubTab("users")}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors ${activeSubTab === "users" ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}
+          >
+            👥 Manage Accounts ({users.length})
+          </button>
+        </div>
+      </div>
+
+      {feedback.text && (
+        <div className={`p-4 rounded-xl border text-sm font-bold flex items-center justify-between ${feedback.type === "error" ? "bg-red-50 border-red-300 text-red-700" : "bg-emerald-50 border-emerald-300 text-emerald-800"}`}>
+          <span>{feedback.text}</span>
+          <button onClick={() => setFeedback({ type: "", text: "" })} className="text-xs underline">Dismiss</button>
+        </div>
+      )}
+
+      {activeSubTab === "transactions" && (
+        <div className="space-y-4">
+          <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap gap-2">
+              {[
+                { id: "all", label: "All Transactions" },
+                { id: "pending_payment", label: "💳 Stripe Checkout" },
+                { id: "waiting_etransfer", label: "⏳ Waiting on eTransfer" },
+                { id: "waiting_cash", label: "📸 Waiting on Cash" },
+                { id: "active", label: "✅ Active & Paid" },
+                { id: "cancelled", label: "❌ Cancelled" }
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setStatusFilter(tab.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${statusFilter === tab.id ? "bg-slate-900 text-white border-slate-900" : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"}`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <button onClick={fetchAdminData} className="text-xs font-bold text-emerald-700 hover:underline">
+              ↻ Refresh Data
+            </button>
+          </div>
+
+          {isLoading ? (
+            <div className="bg-white p-10 rounded-xl border text-center text-smThe updated **`client/src/components/AdminDashboard.jsx`** file below connects the Admin transactions list to the fast on-demand `/api/admin/orders/:id/lockbox-photo` endpoint, so the initial transactions list loads without downloading multi-megabyte photos upfront.
+
+In GitHub, open **`client/src/components/AdminDashboard.jsx`**, replace the entire file with the code below, and commit:
+
+```jsx
+// client/src/components/AdminDashboard.jsx
+import React, { useState, useEffect } from "react";
+
+const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:5000").replace(/\/$/, "");
+
+export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
+  const isFullAdmin = currentUser?.role === "admin";
+  const token = localStorage.getItem("gogy_token");
+
+  const [activeSubTab, setActiveSubTab] = useState("transactions"); 
+  const [orders, setOrders] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [previewPhoto, setPreviewPhoto] = useState(null);
+  const [loadingPhotoOrderId, setLoadingPhotoOrderId] = useState(null);
+  
+  const [showDevSettings, setShowDevSettings] = useState(false);
+
+  const [newRole, setNewRole] = useState("user");
+  const [newAccountType, setNewAccountType] = useState("personal");
+  const [newName, setNewName] = useState("");
+  const [newContact, setNewContact] = useState("");
+  const [newAddress, setNewAddress] = useState("");
+  const [newCity, setNewCity] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newConfirmPassword, setNewConfirmPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
+
+  const [resetTargetUser, setResetTargetUser] = useState(null);
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetConfirmPassword, setResetConfirmPassword] = useState("");
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  
+  const [creditAmounts, setCreditAmounts] = useState({});
+  const [feedback, setFeedback] = useState({ type: "", text: "" });
+
+  const fetchAdminData = async () => {
+    try {
+      setIsLoading(true);
+      const timestamp = Date.now();
+      const headers = { Authorization: `Bearer ${token}` };
+
+      // 1. Load transactions first and immediately unblock the UI
+      const ordersRes = await fetch(`${API_BASE}/api/admin/orders?t=${timestamp}`, { headers, cache: "no-store" });
+      if (ordersRes.ok) {
+        setOrders(await ordersRes.json());
+      }
+      setIsLoading(false);
+
+      // 2. Load users and stats in the background
+      const [usersRes, statsRes] = await Promise.all([
+        fetch(`${API_BASE}/api/admin/users?t=${timestamp}`, { headers, cache: "no-store" }),
+        fetch(`${API_BASE}/api/admin/stats?t=${timestamp}`, { headers, cache: "no-store" })
+      ]);
+
+      if (usersRes.ok) setUsers(await usersRes.json());
+      if (statsRes.ok) setStats(await statsRes.json());
+    } catch (err) {
+      console.error("Failed to load admin data:", err);
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAdminData();
+  }, []);
+
+  const handleViewLockboxPhoto = async (order) => {
+    if (order.lockboxPhoto) {
+      setPreviewPhoto(order.lockboxPhoto);
+      return;
+    }
+    try {
+      setLoadingPhotoOrderId(order._id);
+      const res = await fetch(`${API_BASE}/api/admin/orders/${order._id}/lockbox-photo`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not load lockbox photo.");
+      setPreviewPhoto(data.lockboxPhoto);
+    } catch (err) {
+      setFeedback({ type: "error", text: err.message });
+    } finally {
+      setLoadingPhotoOrderId(null);
+    }
+  };
+
+  const validatePasswordRules = (pw, confirmPw) => {
+    if (pw.length < 10) return "Password must be at least 10 characters long.";
+    if (!/[A-Z]/.test(pw)) return "Password must contain at least one capital letter.";
+    if (!/[a-zA-Z]/.test(pw) || !/\d/.test(pw)) return "Password must contain a mix of letters and numbers.";
+    if (pw !== confirmPw) return "Passwords do not match.";
+    return null;
+  };
+
+  const handleVerifyOrder = async (orderId) => {
+    if (!isFullAdmin) return;
+    setFeedback({ type: "", text: "" });
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/orders/${orderId}/verify`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to verify order");
+
+      setOrders((prev) => prev.map((o) => (o._id === orderId ? data : o)));
+      setFeedback({
+        type: "success",
+        text: `Order ${data.orderNumber} verified and set to ACTIVE! Seller has been notified for pickup.`
+      });
+      fetchAdminData();
+      if (onOrdersUpdated) onOrdersUpdated();
+    } catch (err) {
+      setFeedback({ type: "error", text: err.message });
+    }
+  };
+
+  const handleCancelOrder = async (orderId) => {
+    if (!isFullAdmin) return;
+    setFeedback({ type: "", text: "" });
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/orders/${orderId}/cancel`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to cancel order");
+
+      setOrders((prev) => prev.map((o) => (o._id === orderId ? data : o)));
+      setFeedback({
+        type: "success",
+        text: `Order ${data.orderNumber} has been cancelled and stock restored.`
+      });
+      fetchAdminData();
+      if (onOrdersUpdated) onOrdersUpdated();
+    } catch (err) {
+      setFeedback({ type: "error", text: err.message });
+    }
+  };
+
+  const handleCreateAccount = async (e) => {
+    e.preventDefault();
+    if (!isFullAdmin) return;
+    setFeedback({ type: "", text: "" });
+
+    if (!newName.trim()) return setFeedback({ type: "error", text: "Name is required." });
+    if (!newAddress.trim() || !newCity.trim()) return setFeedback({ type: "error", text: "Both Address and City/Town are required." });
+
+    const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newContact);
+    const isValidPhone = /^\+?[\d\s-]{10,}$/.test(newContact);
+    if (!isValidEmail && !isValidPhone) {
+      return setFeedback({ type: "error", text: "Enter a valid email address or phone number (minimum 10 digits)." });
+    }
+
+    const pwErr = validatePasswordRules(newPassword, newConfirmPassword);
+    if (pwErr) return setFeedback({ type: "error", text: pwErr });
+
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          name: newName.trim(),
+          contactMethod: newContact.trim(),
+          password: newPassword,
+          role: newRole,
+          accountType: newRole === "user" ? newAccountType : "business",
+          location: `${newAddress.trim()}, ${newCity.trim()}`
+        })
+      });
+
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+         throw new Error("Backend route not found. Please ensure Render has finished deploying.");
+      }
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not create account");
+
+      setUsers((prev) => [data, ...prev]);
+      setNewName("");
+      setNewContact("");
+      setNewAddress("");
+      setNewCity("");
+      setNewPassword("");
+      setNewConfirmPassword("");
+      setFeedback({ type: "success", text: `Created ${data.role.toUpperCase()} account for ${data.name}.` });
+    } catch (err) {
+      setFeedback({ type: "error", text: err.message });
+    }
+  };
+
   const handleAddCredit = async (userId) => {
     if (!isFullAdmin) return;
     const amount = Number(creditAmounts[userId] || 0);
@@ -413,95 +885,100 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
             <div className="bg-white p-10 rounded-xl border text-center text-sm text-slate-500">No transactions match this filter.</div>
           ) : (
             <div className="space-y-4">
-              {filteredOrders.map((order) => (
-                <div key={order._id} className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
-                    <div>
-                      <div className="flex items-center gap-3">
-                        <span className="font-black text-slate-900 text-base">{order.orderNumber}</span>
-                        {getStatusBadge(order.status, order.paymentMethod)}
-                      </div>
-                      <p className="text-xs text-slate-500 mt-1">
-                        Buyer: <span className="font-bold text-slate-700">{order.buyerName}</span> ({order.buyerContact}) • Placed {new Date(order.createdAt).toLocaleString()}
-                      </p>
-                    </div>
+              {filteredOrders.map((order) => {
+                const canViewLockbox = Boolean(order.lockboxPhoto || order.hasLockboxPhoto || order.paymentMethod === "cash");
 
-                    <div className="text-right flex flex-col items-end gap-2">
+                return (
+                  <div key={order._id} className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
                       <div>
-                        <p className="text-xs font-bold uppercase text-slate-400">Grand Total</p>
-                        <p className="text-xl font-black text-emerald-700">${Number(order.grandTotal).toLocaleString()} GYD</p>
-                        <p className="text-[11px] text-slate-500">{order.paymentOptionLabel}</p>
-                      </div>
-                      {order.dispatchStatus === "pending" && (
-                        <span className="bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded shadow-sm">
-                          ⏳ Waiting for Driver
-                        </span>
-                      )}
-                      {order.dispatchStatus === "active" && (
-                        <span className="bg-blue-100 text-blue-800 border border-blue-300 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded shadow-sm">
-                          🚚 Driver: {order.driverName}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    {order.items.map((item, idx) => (
-                      <div key={idx} className="flex flex-col sm:flex-row items-start sm:items-center justify-between bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs gap-3">
                         <div className="flex items-center gap-3">
-                          {item.image && <img src={item.image} alt={item.title} className="w-12 h-12 rounded object-cover border" />}
-                          <div>
-                            <p className="font-bold text-slate-900 text-sm">{item.quantity}x {item.title}</p>
-                            <p className="text-slate-500">
-                              Seller: <span className="font-semibold">{item.sellerName}</span> • {item.deliveryMethod === "pickup" ? "Local Pickup" : `Deliver To: ${item.buyerLocationType === 'pin' ? 'Pin Drop' : item.buyerAddress}`}
-                            </p>
+                          <span className="font-black text-slate-900 text-base">{order.orderNumber}</span>
+                          {getStatusBadge(order.status, order.paymentMethod)}
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1">
+                          Buyer: <span className="font-bold text-slate-700">{order.buyerName}</span> ({order.buyerContact}) • Placed {new Date(order.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+
+                      <div className="text-right flex flex-col items-end gap-2">
+                        <div>
+                          <p className="text-xs font-bold uppercase text-slate-400">Grand Total</p>
+                          <p className="text-xl font-black text-emerald-700">${Number(order.grandTotal).toLocaleString()} GYD</p>
+                          <p className="text-[11px] text-slate-500">{order.paymentOptionLabel}</p>
+                        </div>
+                        {order.dispatchStatus === "pending" && (
+                          <span className="bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded shadow-sm">
+                            ⏳ Waiting for Driver
+                          </span>
+                        )}
+                        {order.dispatchStatus === "active" && (
+                          <span className="bg-blue-100 text-blue-800 border border-blue-300 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded shadow-sm">
+                            🚚 Driver: {order.driverName}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      {(order.items || []).map((item, idx) => (
+                        <div key={idx} className="flex flex-col sm:flex-row items-start sm:items-center justify-between bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs gap-3">
+                          <div className="flex items-center gap-3">
+                            {item.image && <img src={item.image} alt={item.title} className="w-12 h-12 rounded object-cover border" />}
+                            <div>
+                              <p className="font-bold text-slate-900 text-sm">{item.quantity}x {item.title}</p>
+                              <p className="text-slate-500">
+                                Seller: <span className="font-semibold">{item.sellerName}</span> • {item.deliveryMethod === "pickup" ? "Local Pickup" : `Deliver To: ${item.buyerLocationType === 'pin' ? 'Pin Drop' : item.buyerAddress}`}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-left sm:text-right font-bold text-slate-800">
+                            <p>${(item.unitPrice * item.quantity).toLocaleString()} GYD</p>
+                            {item.shippingCost > 0 && <p className="text-emerald-700">+ ${item.shippingCost.toLocaleString()} GYD Delivery</p>}
                           </div>
                         </div>
-                        <div className="text-left sm:text-right font-bold text-slate-800">
-                          <p>${(item.unitPrice * item.quantity).toLocaleString()} GYD</p>
-                          {item.shippingCost > 0 && <p className="text-emerald-700">+ ${item.shippingCost.toLocaleString()} GYD Delivery</p>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                    <div className="flex items-center gap-3">
-                      {order.lockboxPhoto && (
-                        <button
-                          onClick={() => setPreviewPhoto(order.lockboxPhoto)}
-                          className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-1.5"
-                        >
-                          🔍 View Uploaded Lockbox Cash Photo
-                        </button>
-                      )}
-                      {order.verifiedBy && <span className="text-xs text-slate-400">Updated by {order.verifiedBy}</span>}
+                      ))}
                     </div>
 
-                    {isFullAdmin ? (
-                      <div className="flex items-center gap-2">
-                        {order.status === "waiting_etransfer" && (
-                          <button onClick={() => handleVerifyOrder(order._id)} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm">
-                            ✓ Verify eTransfer & Notify Seller
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                      <div className="flex items-center gap-3">
+                        {canViewLockbox && (
+                          <button
+                            onClick={() => handleViewLockboxPhoto(order)}
+                            disabled={loadingPhotoOrderId === order._id}
+                            className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-1.5"
+                          >
+                            {loadingPhotoOrderId === order._id ? "Loading Photo..." : "🔍 View Uploaded Lockbox Cash Photo"}
                           </button>
                         )}
-                        {order.status === "waiting_cash" && (
-                          <button onClick={() => handleVerifyOrder(order._id)} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm">
-                            ✓ Confirm Lockbox Cash & Notify Seller
-                          </button>
-                        )}
-                        {order.status !== "cancelled" && (
-                          <button onClick={() => handleCancelOrder(order._id)} className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs font-bold px-3.5 py-2 rounded-lg">
-                            Cancel Transaction
-                          </button>
-                        )}
+                        {order.verifiedBy && <span className="text-xs text-slate-400">Updated by {order.verifiedBy}</span>}
                       </div>
-                    ) : (
-                      <span className="text-xs font-semibold text-slate-400 italic">🔒 Viewer account — actions disabled</span>
-                    )}
+
+                      {isFullAdmin ? (
+                        <div className="flex items-center gap-2">
+                          {order.status === "waiting_etransfer" && (
+                            <button onClick={() => handleVerifyOrder(order._id)} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm">
+                              ✓ Verify eTransfer & Notify Seller
+                            </button>
+                          )}
+                          {order.status === "waiting_cash" && (
+                            <button onClick={() => handleVerifyOrder(order._id)} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm">
+                              ✓ Confirm Lockbox Cash & Notify Seller
+                            </button>
+                          )}
+                          {order.status !== "cancelled" && (
+                            <button onClick={() => handleCancelOrder(order._id)} className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs font-bold px-3.5 py-2 rounded-lg">
+                              Cancel Transaction
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs font-semibold text-slate-400 italic">🔒 Viewer account — actions disabled</span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
