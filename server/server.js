@@ -333,7 +333,6 @@ app.post("/api/auth/register", async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, salt);
     const displayName = accountType === "business" ? businessName : `${firstName} ${lastName}`;
 
-    // New users start with posting disabled and $500 pending credit until Admin activates post
     const newUser = await User.create({
       accountType, role: "user", name: displayName, email, phone: verificationPhone,
       password: hashedPassword, location: location.trim(),
@@ -379,8 +378,8 @@ app.post("/api/auth/login", async (req, res) => {
         id: user._id, name: user.name, email: user.email, phone: user.phone,
         location: user.location, role: user.role || "user",
         canPostListings: user.canPostListings !== false,
-        credits: user.credits || 0,
-        pendingCredits: user.pendingCredits || 0
+        credits: user.role === "user" ? (user.credits || 0) : 0,
+        pendingCredits: user.role === "user" ? (user.pendingCredits || 0) : 0
       }
     });
   } catch (err) {
@@ -429,8 +428,7 @@ app.post("/api/orders", async (req, res) => {
     let appliedCredits = 0;
     let finalBalanceDue = Number(grandTotal || 0);
 
-    // Only active credits are applied (pendingCredits remain locked until Admin activates post)
-    if (buyer && buyer.credits > 0) {
+    if (buyer && buyer.role === "user" && buyer.credits > 0) {
       appliedCredits = Math.min(buyer.credits, finalBalanceDue);
       buyer.credits -= appliedCredits;
       finalBalanceDue -= appliedCredits;
@@ -787,6 +785,9 @@ app.patch("/api/admin/users/:id/credits", verifyStaff, requireFullAdmin, async (
     const { amount } = req.body;
     const user = await User.findById(req.params.id).select("-password");
     if (!user) return res.status(404).json({ error: "User not found." });
+    if (user.role !== "user") {
+      return res.status(400).json({ error: "Credits can only be added to regular Buyer/Seller accounts." });
+    }
     user.credits = (user.credits || 0) + Number(amount);
     await user.save();
     res.json({ message: `Successfully added $${Number(amount).toLocaleString()} GYD credits to ${user.name}.`, user });
@@ -822,7 +823,6 @@ app.patch("/api/admin/users/:id/reset-password", verifyStaff, requireFullAdmin, 
   }
 });
 
-// TOGGLE POSTING + ACTIVATE PENDING $500 CREDIT ON FIRST ACTIVATION
 app.patch("/api/admin/users/:id/toggle-posting", verifyStaff, requireFullAdmin, async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
@@ -831,7 +831,7 @@ app.patch("/api/admin/users/:id/toggle-posting", verifyStaff, requireFullAdmin, 
     user.canPostListings = !currentStatus;
 
     let creditMsg = "";
-    if (user.canPostListings && (user.pendingCredits || 0) > 0) {
+    if (user.role === "user" && user.canPostListings && (user.pendingCredits || 0) > 0) {
       const unlocked = user.pendingCredits;
       user.credits = (user.credits || 0) + unlocked;
       user.pendingCredits = 0;
@@ -882,7 +882,6 @@ app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can accept delivery requests." });
 
-    // Enforce Driver Level Active Request Cap
     const [completedCount, activeCount] = await Promise.all([
       Order.countDocuments({ driverId: String(req.staffUser._id), dispatchStatus: "completed" }),
       Order.countDocuments({ driverId: String(req.staffUser._id), dispatchStatus: "active", status: "active" })
