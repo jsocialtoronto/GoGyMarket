@@ -19,7 +19,6 @@ export default function AuthScreen({ onAuthSuccess }) {
   const [city, setCity] = useState("");
   const [isNotRobot, setIsNotRobot] = useState(false);
 
-  // NEW: SMS Verification States
   const [verificationPhone, setVerificationPhone] = useState("");
   const [showVerificationStep, setShowVerificationStep] = useState(false);
   const [verificationCode, setVerificationCode] = useState("");
@@ -84,7 +83,7 @@ export default function AuthScreen({ onAuthSuccess }) {
       if (!res.ok) throw new Error(data.error || "Failed to send verification code.");
 
       setShowVerificationStep(true);
-    } catch(err) {
+    } catch (err) {
       setError(err.message);
     } finally {
       setIsLoading(false);
@@ -306,6 +305,18 @@ export default function AuthScreen({ onAuthSuccess }) {
                 />
                 <span className="text-xs text-slate-600 font-semibold select-none">Show Password</span>
               </label>
+
+              {!isLogin && (
+                <div className="bg-amber-50 border border-amber-300 rounded-lg p-3.5 text-xs text-amber-950 space-y-1.5">
+                  <p className="font-black uppercase tracking-wider text-amber-900">💰 $500 Welcome Credit & Onboarding Notice</p>
+                  <p className="leading-relaxed">
+                    Every new account receives a <strong>$500 GYD credit</strong> that can only be used toward purchases and delivery charges on GoGyMarket. Its value <strong>cannot be taken out in cash</strong>.
+                  </p>
+                  <p className="leading-relaxed">
+                    Posting access and your $500 credit will only become active after registration is complete—which occurs once you finish <strong>seller's onboarding</strong> after a GoGyMarket representative delivers your lockbox.
+                  </p>
+                </div>
+              )}
 
               {!isLogin && (
                 <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mt-2 flex items-center gap-3">
