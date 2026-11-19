@@ -722,7 +722,7 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
                         <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${u.role === "admin" ? "bg-emerald-100 text-emerald-800 border border-emerald-300" : u.role === "viewer" ? "bg-amber-100 text-amber-800 border border-amber-300" : u.role === "driver" ? "bg-blue-100 text-blue-800 border border-blue-300" : "bg-slate-100 text-slate-700 border border-slate-300"}`}>
                           {u.role === "user" ? `buyer/seller (${u.accountType || "personal"})` : u.role}
                         </span>
-                        {isRestricted && (
+                        {isRestricted && u.role === "user" && (
                           <span className="bg-red-100 text-red-800 border border-red-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
                             🚫 Post Restricted
                           </span>
@@ -732,10 +732,12 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
                             ⭐ {u.averageRating} ({u.ratingCount})
                           </span>
                         )}
-                        <span className="text-[11px] font-bold px-2 py-0.5 bg-slate-800 text-slate-200 rounded-full">
-                          💰 ${(u.credits || 0).toLocaleString()} GYD
-                        </span>
-                        {(u.pendingCredits || 0) > 0 && (
+                        {u.role === "user" && (
+                          <span className="text-[11px] font-bold px-2 py-0.5 bg-slate-800 text-slate-200 rounded-full">
+                            💰 ${(u.credits || 0).toLocaleString()} GYD
+                          </span>
+                        )}
+                        {u.role === "user" && (u.pendingCredits || 0) > 0 && (
                           <span className="text-[11px] font-bold px-2 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 rounded-full">
                             ⏳ ${Number(u.pendingCredits).toLocaleString()} Pending Credit
                           </span>
@@ -746,22 +748,24 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
 
                     {isFullAdmin && (
                       <div className="flex flex-col items-end gap-2">
-                        <div className="flex items-center gap-2">
-                           <input 
+                        {u.role === "user" && (
+                          <div className="flex items-center gap-2">
+                            <input 
                               type="number" 
                               min="0" 
                               placeholder="$ Amount"
                               value={creditAmounts[u._id] || ""}
                               onChange={e => setCreditAmounts(prev => ({...prev, [u._id]: e.target.value}))}
                               className="border border-slate-300 rounded px-2 py-1 text-xs w-24 focus:outline-none focus:border-emerald-500"
-                           />
-                           <button 
+                            />
+                            <button 
                               onClick={() => handleAddCredit(u._id)}
                               className="text-xs font-bold px-3 py-1 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200"
-                           >
-                             + Add Credit
-                           </button>
-                        </div>
+                            >
+                              + Add Credit
+                            </button>
+                          </div>
+                        )}
                         <div className="flex items-center gap-2">
                           {u.role === "user" && (
                             <button 
