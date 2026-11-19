@@ -46,6 +46,13 @@ function validateStrictPassword(pw) {
   return null;
 }
 
+function getDriverLevelInfo(completedCount) {
+  if (completedCount >= 30) return { level: 4, maxActive: 30, nextLevelAt: null };
+  if (completedCount >= 20) return { level: 3, maxActive: 20, nextLevelAt: 30 };
+  if (completedCount >= 10) return { level: 2, maxActive: 10, nextLevelAt: 20 };
+  return { level: 1, maxActive: 5, nextLevelAt: 10 };
+}
+
 // ==========================================
 // 1. MONGOOSE SCHEMAS & MODELS
 // ==========================================
@@ -61,8 +68,9 @@ const userSchema = new mongoose.Schema(
     location: { type: String, required: true, default: "Toronto, ON" },
     averageRating: { type: Number, default: 0 },
     ratingCount: { type: Number, default: 0 },
-    canPostListings: { type: Boolean, default: true },
-    credits: { type: Number, default: 0 } 
+    canPostListings: { type: Boolean, default: false },
+    credits: { type: Number, default: 0 },
+    pendingCredits: { type: Number, default: 0 }
   },
   { timestamps: true }
 );
@@ -159,7 +167,6 @@ const orderSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-// CRITICAL INDEX: Prevents MongoDB from running out of RAM when sorting orders
 orderSchema.index({ createdAt: -1 });
 orderSchema.index({ dispatchStatus: 1, status: 1, createdAt: -1 });
 const Order = mongoose.model("Order", orderSchema);
@@ -181,9 +188,6 @@ const ratingSchema = new mongoose.Schema(
 );
 const Rating = mongoose.model("Rating", ratingSchema);
 
-// ==========================================
-// HELPER: Re-attach lightweight thumbnails to Orders
-// ==========================================
 async function hydrateOrderThumbnails(orders) {
   if (!Array.isArray(orders) || orders.length === 0) return [];
   const listings = await Listing.find().select("_id title images").lean();
@@ -209,7 +213,6 @@ async function hydrateOrderThumbnails(orders) {
 
 async function initializeDatabase() {
   try {
-    // Sync indexes so sorting never hits the 32MB memory limit
     await Order.syncIndexes();
     await Listing.syncIndexes();
 
@@ -220,7 +223,8 @@ async function initializeDatabase() {
       const hashedPassword = await bcrypt.hash("AdminPass123", salt);
       await User.create({
         accountType: "business", role: "admin", name: "GoGyMarket Master Admin",
-        email: masterEmail, password: hashedPassword, location: "2033 Yonge Street, Toronto"
+        email: masterEmail, password: hashedPassword, location: "2033 Yonge Street, Toronto",
+        canPostListings: true
       });
       console.log("🛡️ Created Master Admin: admin@gogymarket.com");
     }
@@ -329,16 +333,27 @@ app.post("/api/auth/register", async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, salt);
     const displayName = accountType === "business" ? businessName : `${firstName} ${lastName}`;
 
+    // New users start with posting disabled and $500 pending credit until Admin activates post
     const newUser = await User.create({
       accountType, role: "user", name: displayName, email, phone: verificationPhone,
-      password: hashedPassword, location: location.trim(), canPostListings: true, credits: 0
+      password: hashedPassword, location: location.trim(),
+      canPostListings: false,
+      credits: 0,
+      pendingCredits: 500
     });
 
     otpCache.delete(verificationPhone); 
     const token = jwt.sign({ id: newUser._id, role: newUser.role }, JWT_SECRET, { expiresIn: "7d" });
 
     res.status(201).json({
-      token, user: { id: newUser._id, name: newUser.name, email: newUser.email, phone: newUser.phone, location: newUser.location, role: newUser.role, canPostListings: newUser.canPostListings, credits: newUser.credits }
+      token,
+      user: {
+        id: newUser._id, name: newUser.name, email: newUser.email, phone: newUser.phone,
+        location: newUser.location, role: newUser.role,
+        canPostListings: newUser.canPostListings,
+        credits: newUser.credits,
+        pendingCredits: newUser.pendingCredits
+      }
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -359,7 +374,14 @@ app.post("/api/auth/login", async (req, res) => {
     const token = jwt.sign({ id: user._id, role: user.role || "user" }, JWT_SECRET, { expiresIn: "7d" });
 
     res.json({
-      token, user: { id: user._id, name: user.name, email: user.email, phone: user.phone, location: user.location, role: user.role || "user", canPostListings: user.canPostListings !== false, credits: user.credits || 0 }
+      token,
+      user: {
+        id: user._id, name: user.name, email: user.email, phone: user.phone,
+        location: user.location, role: user.role || "user",
+        canPostListings: user.canPostListings !== false,
+        credits: user.credits || 0,
+        pendingCredits: user.pendingCredits || 0
+      }
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -407,6 +429,7 @@ app.post("/api/orders", async (req, res) => {
     let appliedCredits = 0;
     let finalBalanceDue = Number(grandTotal || 0);
 
+    // Only active credits are applied (pendingCredits remain locked until Admin activates post)
     if (buyer && buyer.credits > 0) {
       appliedCredits = Math.min(buyer.credits, finalBalanceDue);
       buyer.credits -= appliedCredits;
@@ -447,7 +470,6 @@ app.post("/api/orders", async (req, res) => {
       }
     }
 
-    // Do NOT duplicate massive Base64 images inside Order documents; hydrate dynamically from Listing
     const formattedItems = items.map((i) => ({
       listingId: i._id || i.listingId, title: i.title, sellerId: i.sellerId, sellerName: i.sellerName,
       sellerLocation: i.location || i.sellerLocation || "", quantity: Number(i.quantity || 1), unitPrice: Number(i.price || i.unitPrice || 0),
@@ -538,7 +560,6 @@ app.post("/api/orders/confirm-stripe", async (req, res) => {
   }
 });
 
-// FAST USER ORDERS: Excludes heavy Base64 strings during DB sort, then attaches listing thumbnails
 app.get("/api/orders/user/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -643,7 +664,6 @@ app.get("/api/admin/stats", verifyStaff, async (req, res) => {
   }
 });
 
-// FAST ADMIN ORDERS: Excludes Base64 strings from sort, then attaches thumbnails
 app.get("/api/admin/orders", verifyStaff, async (req, res) => {
   try {
     const rawOrders = await Order.find()
@@ -748,7 +768,14 @@ app.post("/api/admin/users", verifyStaff, requireFullAdmin, async (req, res) => 
     }
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
-    const newAccount = await User.create({ accountType: accountType || (role === "user" ? "personal" : "business"), role, name: name.trim(), email, phone, password: hashedPassword, location: location || "Toronto, ON" });
+    const newAccount = await User.create({
+      accountType: accountType || (role === "user" ? "personal" : "business"),
+      role, name: name.trim(), email, phone, password: hashedPassword,
+      location: location || "Toronto, ON",
+      canPostListings: role !== "user",
+      credits: 0,
+      pendingCredits: role === "user" ? 500 : 0
+    });
     res.status(201).json(newAccount);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -795,14 +822,29 @@ app.patch("/api/admin/users/:id/reset-password", verifyStaff, requireFullAdmin, 
   }
 });
 
+// TOGGLE POSTING + ACTIVATE PENDING $500 CREDIT ON FIRST ACTIVATION
 app.patch("/api/admin/users/:id/toggle-posting", verifyStaff, requireFullAdmin, async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ error: "User not found." });
     const currentStatus = user.canPostListings !== false;
     user.canPostListings = !currentStatus;
+
+    let creditMsg = "";
+    if (user.canPostListings && (user.pendingCredits || 0) > 0) {
+      const unlocked = user.pendingCredits;
+      user.credits = (user.credits || 0) + unlocked;
+      user.pendingCredits = 0;
+      creditMsg = ` and unlocked $${unlocked.toLocaleString()} GYD in account credits`;
+    }
+
     await user.save();
-    res.json({ message: `User posting access set to ${user.canPostListings}.`, canPostListings: user.canPostListings });
+    res.json({
+      message: `${user.name} posting ${user.canPostListings ? "ACTIVATED" : "RESTRICTED"}${creditMsg}.`,
+      canPostListings: user.canPostListings,
+      credits: user.credits,
+      pendingCredits: user.pendingCredits
+    });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -818,10 +860,9 @@ app.delete("/api/admin/emergency-clear-listings", verifyStaff, requireFullAdmin,
 });
 
 // ==========================================
-// 6. DRIVER API ROUTES
+// 6. DRIVER API ROUTES (WITH LEVELS & CAPS)
 // ==========================================
 
-// FAST DRIVER ORDERS: Excludes Base64 strings from sort, then attaches thumbnails
 app.get("/api/driver/orders", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver" && req.staffUser.role !== "admin") return res.status(403).json({ error: "Driver or Admin access required." });
@@ -840,6 +881,20 @@ app.get("/api/driver/orders", verifyStaff, async (req, res) => {
 app.patch("/api/driver/orders/:id/accept", verifyStaff, async (req, res) => {
   try {
     if (req.staffUser.role !== "driver") return res.status(403).json({ error: "Only drivers can accept delivery requests." });
+
+    // Enforce Driver Level Active Request Cap
+    const [completedCount, activeCount] = await Promise.all([
+      Order.countDocuments({ driverId: String(req.staffUser._id), dispatchStatus: "completed" }),
+      Order.countDocuments({ driverId: String(req.staffUser._id), dispatchStatus: "active", status: "active" })
+    ]);
+    const levelInfo = getDriverLevelInfo(completedCount);
+
+    if (activeCount >= levelInfo.maxActive) {
+      return res.status(400).json({
+        error: `Level ${levelInfo.level} Limit Reached: You can only take ${levelInfo.maxActive} active requests at a time. Complete current deliveries to accept more.`
+      });
+    }
+
     const order = await Order.findById(req.params.id).select("-lockboxPhoto -items.image");
     if (!order) return res.status(404).json({ error: "Order not found." });
     if (order.status === "cancelled") return res.status(400).json({ error: "Order has been cancelled." });
@@ -959,7 +1014,7 @@ app.post("/api/listings", async (req, res) => {
   try {
     const seller = await User.findById(req.body.sellerId).lean();
     if (!seller) return res.status(404).json({ error: "Seller account not found." });
-    if (seller.canPostListings === false) return res.status(403).json({ error: "Your account has been restricted from posting new listings." });
+    if (seller.canPostListings === false) return res.status(403).json({ error: "Your posting ability is not yet activated. Please wait for Admin approval after seller onboarding." });
 
     const stock = req.body.stockCount != null ? Number(req.body.stockCount) : 1;
     const newListing = await Listing.create({
