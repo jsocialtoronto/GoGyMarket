@@ -87,15 +87,13 @@ export default function App() {
       setIsLoading(true);
       const timestamp = Date.now();
 
-      // 1. Fetch listings FIRST and immediately unblock the Search screen
       const listingsRes = await fetch(`${API_BASE}/api/listings?t=${timestamp}`, { cache: "no-store" });
       if (listingsRes.ok) {
         const data = await listingsRes.json();
         setListings(Array.isArray(data) ? data : []);
       }
-      setIsLoading(false); // Unblocks Search tab immediately!
+      setIsLoading(false);
 
-      // 2. Load conversations, orders, and ratings in the background without blocking the UI
       const convsRes = await fetch(`${API_BASE}/api/conversations?t=${timestamp}`, { cache: "no-store" });
       if (convsRes.ok) {
         const convsData = await convsRes.json();
@@ -122,8 +120,18 @@ export default function App() {
         if (userRes.ok) {
           const uData = await userRes.json();
           setCurrentUser(prev => {
-            if (!prev || prev.credits === (uData.credits || 0)) return prev;
-            const updated = { ...prev, credits: uData.credits || 0 };
+            if (
+              !prev ||
+              (prev.credits === (uData.credits || 0) &&
+                prev.pendingCredits === (uData.pendingCredits || 0) &&
+                prev.canPostListings === (uData.canPostListings !== false))
+            ) return prev;
+            const updated = {
+              ...prev,
+              credits: uData.credits || 0,
+              pendingCredits: uData.pendingCredits || 0,
+              canPostListings: uData.canPostListings !== false
+            };
             localStorage.setItem("gogy_user", JSON.stringify(updated));
             return updated;
           });
@@ -770,6 +778,35 @@ export default function App() {
                   ↻ Refresh Requests
                 </button>
               </div>
+
+              {(() => {
+                const safeOrders = Array.isArray(driverOrders) ? driverOrders : [];
+                const completedCount = safeOrders.filter(o => String(o.driverId) === String(currentUser.id) && o.dispatchStatus === "completed").length;
+                const activeCount = safeOrders.filter(o => String(o.driverId) === String(currentUser.id) && o.dispatchStatus === "active" && o.status === "active").length;
+                const level = completedCount >= 30 ? 4 : completedCount >= 20 ? 3 : completedCount >= 10 ? 2 : 1;
+                const maxActive = level === 4 ? 30 : level === 3 ? 20 : level === 2 ? 10 : 5;
+                const nextAt = level === 4 ? null : level * 10;
+
+                return (
+                  <div className="bg-slate-900 text-white p-4 rounded-xl flex flex-wrap items-center justify-between gap-4 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <span className="bg-emerald-500 text-slate-950 font-black px-3 py-1.5 rounded-lg text-sm">
+                        LEVEL {level}
+                      </span>
+                      <div>
+                        <p className="text-sm font-bold">
+                          Active Capacity: <span className={activeCount >= maxActive ? "text-amber-400" : "text-emerald-400"}>{activeCount} / {maxActive}</span> requests
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {nextAt
+                            ? `${completedCount} completed • Complete ${nextAt - completedCount} more to reach Level ${level + 1}`
+                            : `${completedCount} completed • Max Level Reached (30 active cap)`}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="flex flex-wrap gap-2 bg-slate-100 p-1.5 rounded-lg w-fit">
                 <button 
@@ -1533,7 +1570,6 @@ export default function App() {
             </div>
           )}
 
-          {/* BUYER/SELLER MESSAGES TAB */}
           {!isDriver && activeTab === "messages" && (
             <div className="max-w-5xl mx-auto space-y-6">
               <div>
@@ -1703,7 +1739,6 @@ export default function App() {
             </div>
           )}
 
-          {/* USER ACCOUNT SETTINGS TAB */}
           {activeTab === "account" && (
             <div className="max-w-xl mx-auto space-y-6">
               <div>
@@ -1719,6 +1754,19 @@ export default function App() {
                 </div>
                 <div className="text-5xl opacity-80">💰</div>
               </div>
+
+              {(currentUser?.pendingCredits || 0) > 0 && (
+                <div className="bg-amber-50 p-5 rounded-xl border border-amber-300 flex items-center justify-between">
+                  <div>
+                    <h3 className="font-bold text-amber-900 uppercase tracking-wider text-xs">⏳ Pending Welcome Credit</h3>
+                    <p className="text-3xl font-black text-amber-800 mt-1">${Number(currentUser.pendingCredits).toLocaleString()} GYD</p>
+                    <p className="text-xs text-amber-900 mt-1">
+                      Unlocks automatically once seller onboarding is complete (lockbox delivered) and Admin activates your account. Usable for purchases & delivery charges only (not redeemable for cash).
+                    </p>
+                  </div>
+                  <div className="text-4xl">🔒</div>
+                </div>
+              )}
 
               <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
                 <h3 className="font-bold text-slate-900 border-b border-slate-100 pb-3 mb-4">Change Password</h3>
