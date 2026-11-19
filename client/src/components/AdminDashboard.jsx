@@ -42,7 +42,6 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
       const timestamp = Date.now();
       const headers = { Authorization: `Bearer ${token}` };
 
-      // 1. Load transactions first and immediately unblock the UI
       const ordersRes = await fetch(`${API_BASE}/api/admin/orders?t=${timestamp}`, { headers, cache: "no-store" });
       if (ordersRes.ok) {
         const oData = await ordersRes.json();
@@ -50,7 +49,6 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
       }
       setIsLoading(false);
 
-      // 2. Load users and stats in the background
       const [usersRes, statsRes] = await Promise.all([
         fetch(`${API_BASE}/api/admin/users?t=${timestamp}`, { headers, cache: "no-store" }),
         fetch(`${API_BASE}/api/admin/stats?t=${timestamp}`, { headers, cache: "no-store" })
@@ -290,7 +288,18 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to update posting permissions");
 
-      setUsers((prev) => prev.map((u) => u._id === userObj._id ? { ...u, canPostListings: data.canPostListings } : u));
+      setUsers((prev) =>
+        prev.map((u) =>
+          u._id === userObj._id
+            ? {
+                ...u,
+                canPostListings: data.canPostListings,
+                credits: data.credits !== undefined ? data.credits : u.credits,
+                pendingCredits: data.pendingCredits !== undefined ? data.pendingCredits : u.pendingCredits
+              }
+            : u
+        )
+      );
       setFeedback({ type: "success", text: data.message });
     } catch (err) {
       setFeedback({ type: "error", text: err.message });
@@ -726,6 +735,11 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
                         <span className="text-[11px] font-bold px-2 py-0.5 bg-slate-800 text-slate-200 rounded-full">
                           💰 ${(u.credits || 0).toLocaleString()} GYD
                         </span>
+                        {(u.pendingCredits || 0) > 0 && (
+                          <span className="text-[11px] font-bold px-2 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 rounded-full">
+                            ⏳ ${Number(u.pendingCredits).toLocaleString()} Pending Credit
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-slate-500 mt-0.5">{u.email || u.phone} • 📍 {u.location}</p>
                     </div>
@@ -752,9 +766,9 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
                           {u.role === "user" && (
                             <button 
                               onClick={() => handleTogglePosting(u)} 
-                              className={`text-xs font-bold px-3 py-1.5 rounded-lg border ${!isRestricted ? "bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200" : "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200"}`}
+                              className={`text-xs font-bold px-3 py-1.5 rounded-lg border ${!isRestricted ? "bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200" : "bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-600"}`}
                             >
-                              {!isRestricted ? "🚫 Restrict Posting" : "✅ Allow Posting"}
+                              {!isRestricted ? "🚫 Restrict Post" : "✅ Activate Post"}
                             </button>
                           )}
                           <button onClick={() => { setResetTargetUser(u); setResetPassword(""); setResetConfirmPassword(""); setShowResetPassword(false); }} className="text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg">
