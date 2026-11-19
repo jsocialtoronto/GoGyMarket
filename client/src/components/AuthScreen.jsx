@@ -15,8 +15,10 @@ export default function AuthScreen({ onAuthSuccess }) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   
+  const [locationType, setLocationType] = useState("address"); // "address" | "pin"
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("");
+  const [pinDrop, setPinDrop] = useState("");
   const [isNotRobot, setIsNotRobot] = useState(false);
 
   const [verificationPhone, setVerificationPhone] = useState("");
@@ -28,6 +30,7 @@ export default function AuthScreen({ onAuthSuccess }) {
 
   const isEmail = contactMethod.includes("@");
   const activePhone = isEmail ? verificationPhone : contactMethod;
+  const finalLocation = locationType === "pin" ? pinDrop.trim() : `${address.trim()}, ${city.trim()}`;
 
   const validateRegistration = () => {
     if (accountType === "personal") {
@@ -36,7 +39,11 @@ export default function AuthScreen({ onAuthSuccess }) {
       if (!businessName.trim()) return "Business Name is required.";
     }
 
-    if (!address.trim() || !city.trim()) return "Both Address and City/Town are required.";
+    if (locationType === "address") {
+      if (!address.trim() || !city.trim()) return "Both Address and City/Town are required.";
+    } else {
+      if (!pinDrop.trim()) return "Please paste a valid Google Maps pin drop link or coordinates.";
+    }
 
     const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactMethod);
     const isValidPhone = /^\+?[\d\s-]{10,}$/.test(contactMethod);
@@ -76,7 +83,7 @@ export default function AuthScreen({ onAuthSuccess }) {
         body: JSON.stringify({ 
           phone: activePhone, 
           email: isEmail ? contactMethod.toLowerCase().trim() : undefined,
-          location: `${address.trim()}, ${city.trim()}` 
+          location: finalLocation 
         })
       });
       const data = await res.json();
@@ -111,7 +118,7 @@ export default function AuthScreen({ onAuthSuccess }) {
           businessName, 
           contactMethod, 
           password, 
-          location: `${address.trim()}, ${city.trim()}`,
+          location: finalLocation,
           verificationPhone: activePhone,
           verificationCode 
         };
@@ -229,15 +236,49 @@ export default function AuthScreen({ onAuthSuccess }) {
               )}
 
               {!isLogin && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Address *</label>
-                    <input type="text" placeholder="e.g. 15 Eastdale Ave" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 focus:border-emerald-500 focus:outline-none" />
+                <div className="space-y-2.5">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Location Method *</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setLocationType("address")}
+                      className={`py-2 px-3 rounded-lg border text-xs font-bold transition-colors ${locationType === "address" ? "bg-emerald-50 border-emerald-500 text-emerald-700" : "bg-white border-slate-300 text-slate-600 hover:bg-slate-50"}`}
+                    >
+                      🏠 Street Address
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLocationType("pin")}
+                      className={`py-2 px-3 rounded-lg border text-xs font-bold transition-colors ${locationType === "pin" ? "bg-emerald-50 border-emerald-500 text-emerald-700" : "bg-white border-slate-300 text-slate-600 hover:bg-slate-50"}`}
+                    >
+                      📍 Pin Drop Location
+                    </button>
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">City / Town *</label>
-                    <input type="text" placeholder="e.g. Toronto" value={city} onChange={(e) => setCity(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 focus:border-emerald-500 focus:outline-none" />
-                  </div>
+
+                  {locationType === "address" ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Address *</label>
+                        <input type="text" placeholder="e.g. 15 Eastdale Ave" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 focus:border-emerald-500 focus:outline-none" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">City / Town *</label>
+                        <input type="text" placeholder="e.g. Toronto" value={city} onChange={(e) => setCity(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2.5 focus:border-emerald-500 focus:outline-none" />
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Google Maps Pin Drop Link *</label>
+                      <input
+                        type="text"
+                        placeholder="Paste Google Maps share link (e.g. https://maps.app.goo.gl/...)"
+                        value={pinDrop}
+                        onChange={(e) => setPinDrop(e.target.value)}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm focus:border-emerald-500 focus:outline-none"
+                      />
+                      <p className="text-[10px] text-slate-500 mt-1">Open Google Maps, drop a pin at your location, tap Share, and paste the link here.</p>
+                    </div>
+                  )}
                 </div>
               )}
 
