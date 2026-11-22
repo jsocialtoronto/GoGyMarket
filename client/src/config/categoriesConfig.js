@@ -34,5 +34,43 @@ export const MARKETPLACE_CATEGORIES = {
     "Meat, Poultry & Seafood",
     "Groceries & Packaged Foods",
     "Seeds, Fertilizers & Farm Supplies"
+  ],
+  "Health, Beauty & Personal Care": [
+    "Skincare",
+    "Haircare",
+    "Fragrances & Cosmetics",
+    "Grooming & Personal Care",
+    "Vitamins & Supplements"
+  ],
+  "Tools, Hardware & DIY": [
+    "Power Tools",
+    "Hand Tools",
+    "Paint & Building Supplies",
+    "Electrical & Lighting",
+    "Auto Parts & Accessories"
+  ],
+  "Baby, Kids & Toys": [
+    "Baby Gear & Strollers",
+    "Diapers, Formula & Feeding",
+    "Toys & Games",
+    "Kids Furniture & Decor"
+  ],
+  "Sports, Fitness & Outdoors": [
+    "Gym & Fitness Equipment",
+    "Sports Gear",
+    "Camping & Fishing",
+    "Bicycles & Scooters"
+  ],
+  "Books, Office & School Supplies": [
+    "Books & Textbooks",
+    "Stationery & School Supplies",
+    "Office Equipment & Printers",
+    "Desk & Office Accessories"
+  ],
+  "Pet Supplies": [
+    "Pet Food & Treats",
+    "Collars, Leashes & Carriers",
+    "Pet Grooming & Health",
+    "Pet Toys & Beds"
   ]
 };
