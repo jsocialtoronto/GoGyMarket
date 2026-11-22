@@ -769,7 +769,7 @@ app.post("/api/admin/users", verifyStaff, requireFullAdmin, async (req, res) => 
     const newAccount = await User.create({
       accountType: accountType || (role === "user" ? "personal" : "business"),
       role, name: name.trim(), email, phone, password: hashedPassword,
-      location: location || "Toronto, ON",
+      location: role === "driver" ? "Mobile Driver" : (location || "Toronto, ON"),
       canPostListings: role !== "user",
       credits: 0,
       pendingCredits: role === "user" ? 500 : 0
