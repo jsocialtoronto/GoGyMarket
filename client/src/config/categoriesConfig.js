@@ -1,45 +1,38 @@
 // client/src/config/categoriesConfig.js
-
 export const MARKETPLACE_CATEGORIES = {
   "Electronics": [
     "Phones & Tablets",
-    "Computers & Laptops",
-    "TVs & Audio",
+    "Computers & Accessories",
+    "TVs & Home Entertainment",
     "Video Games & Consoles",
-    "Other Electronics"
-  ],
-  "Vehicles": [
-    "Cars & Trucks",
-    "Motorcycles",
-    "Bicycles",
-    "Parts & Accessories"
+    "Headphones & Audio",
+    "Cameras & Photography",
+    "Smart Home & Networking",
+    "Electronics Accessories & Other"
   ],
   "Home & Garden": [
-    "Furniture",
-    "Appliances",
-    "Tools & Home Improvement",
-    "Garden & Outdoor"
+    "Home Appliances",
+    "Home Decor & Accessories",
+    "Kitchen & Dining",
+    "Garden & Outdoor",
+    "Bathroom & Plumbing",
+    "Household Essentials & Storage"
   ],
   "Fashion & Accessories": [
-    "Clothing",
-    "Shoes",
+    "Clothing › Baby Clothing & Accessories",
+    "Clothing › Children's & Youth Fashion",
+    "Clothing › Women's Fashion",
+    "Clothing › Men's Fashion",
+    "Shoes & Footwear",
+    "Bags & Luggage",
     "Jewelry & Watches",
-    "Bags & Luggage"
+    "Fashion Accessories",
+    "Traditional & Special Occasion Wear"
   ],
-  "Hobbies & Leisure": [
-    "Sports Equipment",
-    "Toys & Games",
-    "Books & Music",
-    "Collectibles & Art"
-  ],
-  "Miscellaneous": [
-    "Free Stuff",
-    "Other"
+  "Food & Agriculture": [
+    "Fruits & Vegetables",
+    "Meat, Poultry & Seafood",
+    "Groceries & Packaged Foods",
+    "Seeds, Fertilizers & Farm Supplies"
   ]
-};
-
-export const LISTING_STATUSES = {
-  active: { label: "Active", badgeClass: "bg-emerald-100 text-emerald-800 border-emerald-300" },
-  pending: { label: "Pending", badgeClass: "bg-amber-100 text-amber-800 border-amber-300" },
-  sold: { label: "Sold Out", badgeClass: "bg-red-100 text-red-800 border-red-300" }
 };
