@@ -151,7 +151,9 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
     setFeedback({ type: "", text: "" });
 
     if (!newName.trim()) return setFeedback({ type: "error", text: "Name is required." });
-    if (!newAddress.trim() || !newCity.trim()) return setFeedback({ type: "error", text: "Both Address and City/Town are required." });
+    if (newRole !== "driver" && (!newAddress.trim() || !newCity.trim())) {
+      return setFeedback({ type: "error", text: "Both Address and City/Town are required." });
+    }
 
     const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newContact);
     const isValidPhone = /^\+?[\d\s-]{10,}$/.test(newContact);
@@ -172,7 +174,7 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
           password: newPassword,
           role: newRole,
           accountType: newRole === "user" ? newAccountType : "business",
-          location: `${newAddress.trim()}, ${newCity.trim()}`
+          location: newRole === "driver" ? "Mobile Driver" : `${newAddress.trim()}, ${newCity.trim()}`
         })
       });
 
@@ -668,16 +670,18 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
                   <input type="text" required placeholder="e.g. Jane Doe or Jane's Bakery" value={newName} onChange={(e) => setNewName(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Address *</label>
-                    <input type="text" required placeholder="15 Eastdale Ave" value={newAddress} onChange={(e) => setNewAddress(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+                {newRole !== "driver" && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Address *</label>
+                      <input type="text" required placeholder="15 Eastdale Ave" value={newAddress} onChange={(e) => setNewAddress(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase mb-1">City / Town *</label>
+                      <input type="text" required placeholder="Toronto" value={newCity} onChange={(e) => setNewCity(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">City / Town *</label>
-                    <input type="text" required placeholder="Toronto" value={newCity} onChange={(e) => setNewCity(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
-                  </div>
-                </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Email or Phone Number *</label>
@@ -743,7 +747,9 @@ export default function AdminDashboard({ currentUser, onOrdersUpdated }) {
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-slate-500 mt-0.5">{u.email || u.phone} • 📍 {u.location}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {u.email || u.phone}{u.role !== "driver" && u.location ? ` • 📍 ${u.location}` : ""}
+                      </p>
                     </div>
 
                     {isFullAdmin && (
